@@ -415,3 +415,8 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
+
+.player-message { color: #aaa8a4; font-size: 12px; }
+.continuation { margin-top: 14px; }
+.form-error { margin: 14px 0 0; color: #a55d55; font-size: 11px; }
+
