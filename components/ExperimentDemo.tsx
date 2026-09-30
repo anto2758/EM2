@@ -134,7 +134,7 @@ function StrokeButton({ children, onClick, primary = false, disabled = false }: 
   disabled?: boolean;
 }) {
   return (
-    <span className="button-wrap">
+    <span className="stroke-wrap">
       <button className={`button${primary ? " primary" : ""}`} onClick={onClick} disabled={disabled} type="button">
         {children}
       </button>
@@ -178,7 +178,7 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
 
   return (
     <>
-      <div className="stimulus-card">
+      <div className="stimulus-card graphite-onboarding-stroke mini-soft-shadow">
         <div className="stimulus-meta">
           <span>{label}</span>
           <span>{complete ? "Complete" : started ? `${Math.min((index ?? 0) + 1, sequence.length)} of ${sequence.length}` : "Ready"}</span>
@@ -356,7 +356,7 @@ export function ExperimentDemo() {
                 ["provided", "receive", "Provided", "Evaluate a matched pattern."],
               ] as const).map(([value, iconName, title, description]) => (
                 <button
-                  className={`option-card${condition === value ? " selected" : ""}`}
+                  className={`option-card graphite-onboarding-stroke mini-soft-shadow${condition === value ? " selected" : ""}`}
                   onClick={() => setCondition(value)}
                   aria-pressed={condition === value}
                   type="button"
@@ -377,7 +377,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">Before you begin</p>
             <h1>Find a pattern</h1>
             <p className="lede">Watch both color and shape. Look for combinations that predict what comes next.</p>
-            <div className="belief-card"><span className="belief-label">Remember</span><p className="belief-text">Patterns do not need to hold every time.</p></div>
+            <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Remember</span><p className="belief-text">Patterns do not need to hold every time.</p></div>
             <div className="actions"><StrokeButton primary onClick={() => setScreen("calibration")}>I understand</StrokeButton></div>
           </>
         )}
@@ -397,7 +397,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">A possible regularity</p>
             <h1>Consider this pattern</h1>
             <p className="lede">Proposed by the matched participant.</p>
-            <div className="belief-card"><span className="belief-label">Provided hypothesis</span><p className="belief-text">{hypothesis}</p></div>
+            <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Provided hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <div className="actions"><StrokeButton primary onClick={() => setScreen("review")}>Continue</StrokeButton></div>
           </>
         )}
@@ -407,7 +407,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">Your observation</p>
             <h1>What did you notice?</h1>
             <p className="lede">Build one rule using both color and shape.</p>
-            <div className="form-card">
+            <div className="form-card graphite-onboarding-stroke mini-soft-shadow">
               <label className="field-label">Your hypothesis</label>
               <div className="hypothesis-builder">
                 <span>After a</span>
@@ -437,7 +437,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">Standardized review</p>
             <h1>Check the pattern</h1>
             <p className="lede">The matched pair receives the same review.</p>
-            <div className="belief-card"><span className="belief-label">Current hypothesis</span><p className="belief-text">{hypothesis}</p></div>
+            <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Current hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <div className="review-grid">
               {diagnosticPairs.map(([first, second], index) => (
                 <div className={`review-pair${sameStimulus(second, consequentStimulus) ? " hit" : ""}`} key={index}>
@@ -454,7 +454,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">Confidence rating</p>
             <h1>How confident are you?</h1>
             <p className="lede">Does this pattern describe the sequence?</p>
-            <div className="belief-card"><span className="belief-label">Your hypothesis</span><p className="belief-text">{hypothesis}</p></div>
+            <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Your hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <ConfidenceControl value={confidence} onChange={setConfidence} />
             <div className="actions"><StrokeButton primary onClick={() => { setRatings([confidence]); setRound(0); setSequenceComplete(false); setScreen("evidence"); }}>Submit rating</StrokeButton></div>
           </>
@@ -468,7 +468,7 @@ export function ExperimentDemo() {
             <SequencePlayer sequence={evidenceSequence} label={`New evidence ${round + 1}`} onComplete={() => { setConfidence(ratings.at(-1) ?? 70); setSequenceComplete(true); }} />
             {sequenceComplete && (
               <>
-                <div className="form-card"><label className="field-label">Update your confidence</label><ConfidenceControl value={confidence} onChange={setConfidence} /></div>
+                <div className="form-card graphite-onboarding-stroke mini-soft-shadow"><label className="field-label">Update your confidence</label><ConfidenceControl value={confidence} onChange={setConfidence} /></div>
                 <div className="actions continuation"><StrokeButton primary onClick={submitEvidenceRating}>{round === EVIDENCE_RATES.length - 1 ? "Finish" : "Submit and continue"}</StrokeButton></div>
               </>
             )}
@@ -480,7 +480,7 @@ export function ExperimentDemo() {
             <p className="eyebrow">Demo complete</p>
             <h1>Your confidence over time</h1>
             <p className="lede">Prototype summary.</p>
-            <div className="chart-card"><Chart ratings={ratings} /></div>
+            <div className="chart-card graphite-onboarding-stroke mini-soft-shadow"><Chart ratings={ratings} /></div>
             <div className="summary-row">
               <div className="summary-item"><div className="summary-value">{ratings[0]}</div><div className="summary-label">Initial confidence</div></div>
               <div className="summary-item"><div className="summary-value">{ratings.at(-1)}</div><div className="summary-label">Final confidence</div></div>
