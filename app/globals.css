@@ -30,7 +30,7 @@ body {
     var(--canvas);
 }
 
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 
 .shell {
@@ -94,7 +94,7 @@ button { color: inherit; }
   width: min(100%, 560px);
   margin: auto;
   padding: 54px 0 40px;
-  animation: enter 320ms cubic-bezier(.2,.75,.25,1) both;
+  animation: enter 320ms cubic-bezier(.2,.75,.25,1) backwards;
 }
 
 .stage.wide { width: min(100%, 720px); }
@@ -109,7 +109,6 @@ button { color: inherit; }
   color: var(--lavender-ink);
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
 }
 
 h1 {
@@ -252,22 +251,40 @@ h1 {
 }
 
 .stimulus-area { display: grid; place-items: center; min-height: 240px; }
-.shape { width: 112px; height: 112px; filter: drop-shadow(0 8px 14px rgba(28,27,24,.09)); }
-.shape.circle { border-radius: 50%; }
-.shape.square { border-radius: 9px; }
-.shape.diamond { border-radius: 9px; transform: rotate(45deg) scale(.82); }
-.shape.triangle {
-  width: 0;
-  height: 0;
-  border-left: 62px solid transparent;
-  border-right: 62px solid transparent;
-  border-bottom: 108px solid currentColor;
-  filter: drop-shadow(0 8px 9px rgba(28,27,24,.1));
+.shape {
+  width: 132px;
+  height: 132px;
+  overflow: visible;
+  filter: drop-shadow(0 8px 14px rgba(28,27,24,.09));
 }
 
-.sequence-dots { display: flex; justify-content: center; gap: 5px; }
-.sequence-dot { width: 4px; height: 4px; border-radius: 99px; background: rgba(0,0,0,.1); }
-.sequence-dot.active { width: 16px; background: #8d769f; }
+.stimulus-focus {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--canvas);
+}
+
+.stimulus-progress {
+  position: absolute;
+  right: clamp(24px, 7vw, 96px);
+  bottom: clamp(28px, 6vh, 64px);
+  left: clamp(24px, 7vw, 96px);
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .07);
+}
+
+.stimulus-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #917aa4;
+  transition: width 180ms ease;
+}
 
 .form-card {
   margin-top: 32px;
@@ -285,29 +302,37 @@ h1 {
   font-weight: 600;
 }
 
-.hypothesis-builder {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 9px;
-  color: #44423e;
-  font-size: 14px;
-  line-height: 2.4;
+.input-stroke {
+  padding: 1px;
+  border-radius: 10px;
+  background: linear-gradient(to bottom, #f3f3f3, #f3f3f3 50%, #eaeaea);
+  transition: background 160ms ease;
 }
 
-.select {
-  appearance: none;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  background: #fafaf8;
-  padding: 8px 30px 8px 11px;
-  color: var(--ink);
-  font-size: 13px;
-  background-image: linear-gradient(45deg, transparent 50%, #777 50%), linear-gradient(135deg, #777 50%, transparent 50%);
-  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
+.input-stroke:focus-within {
+  background: linear-gradient(to bottom, #ebebeb, #e8e8e8 50%, #e0e0e0);
 }
+
+.hypothesis-input {
+  display: block;
+  width: 100%;
+  min-height: 138px;
+  resize: vertical;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  outline: none;
+  background: #fff;
+  padding: 14px 15px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.hypothesis-input::placeholder { color: #a09f9c; }
+.hypothesis-input:focus { background: #fdfdfc; }
+.field-help { margin: 9px 2px 0; color: var(--faint); font-size: 11px; line-height: 1.45; }
 
 .belief-card {
   margin-top: 30px;
@@ -317,7 +342,7 @@ h1 {
   background: linear-gradient(145deg, #fff, #faf8fb);
 }
 
-.belief-label { color: var(--lavender-ink); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.belief-label { color: var(--lavender-ink); font-size: 10px; font-weight: 600; }
 .belief-text { margin: 12px 0 0; font-size: 19px; font-weight: 500; line-height: 1.5; }
 
 .review-grid {
@@ -340,10 +365,7 @@ h1 {
 }
 
 .review-pair.hit { border-color: rgba(113,93,130,.2); background: var(--lavender-soft); }
-.mini-shape { width: 15px; height: 15px; border-radius: 3px; }
-.mini-shape.circle { border-radius: 50%; }
-.mini-shape.diamond { transform: rotate(45deg) scale(.78); }
-.mini-shape.triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.mini-shape { width: 18px; height: 18px; overflow: visible; }
 .arrow { color: #aaa8a4; font-size: 10px; }
 
 .confidence-card { margin-top: 34px; }

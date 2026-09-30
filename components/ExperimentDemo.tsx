@@ -9,7 +9,7 @@ const COLORS = {
   red: "#d98272",
 } as const;
 
-const SHAPES = ["circle", "square", "triangle", "diamond"] as const;
+const SHAPES = ["circle", "triangle", "square", "pentagon"] as const;
 const COLOR_NAMES = Object.keys(COLORS) as ColorName[];
 const EVIDENCE_RATES = [80, 70, 50, 30, 20] as const;
 const STIMULUS_INTERVAL_MS = 1400;
@@ -19,18 +19,20 @@ type ShapeName = (typeof SHAPES)[number];
 type Condition = "generated" | "provided";
 type Screen = "setup" | "intro" | "calibration" | "hypothesis" | "review" | "confidence" | "evidence" | "results";
 type Stimulus = { color: ColorName; shape: ShapeName };
+type StimulusPattern = { color?: ColorName; shape?: ShapeName };
 type IconName = "pencil" | "receive";
 
-const DEFAULT_ANTECEDENT: Stimulus = { color: "yellow", shape: "circle" };
-const DEFAULT_CONSEQUENT: Stimulus = { color: "green", shape: "triangle" };
+const DEFAULT_ANTECEDENT: StimulusPattern = { shape: "circle" };
+const DEFAULT_CONSEQUENT: StimulusPattern = { shape: "triangle" };
+const PROVIDED_HYPOTHESIS = "A circle tends to be followed by a triangle, regardless of color.";
 const CALIBRATION_PATTERNS: Array<{
-  antecedent: Stimulus;
-  consequent: Stimulus;
+  antecedent: StimulusPattern;
+  consequent: StimulusPattern;
   successes: number;
 }> = [
   { antecedent: DEFAULT_ANTECEDENT, consequent: DEFAULT_CONSEQUENT, successes: 5 },
-  { antecedent: { color: "red", shape: "square" }, consequent: { color: "blue", shape: "diamond" }, successes: 5 },
-  { antecedent: { color: "green", shape: "diamond" }, consequent: { color: "yellow", shape: "square" }, successes: 4 },
+  { antecedent: { color: "red" }, consequent: { color: "blue" }, successes: 5 },
+  { antecedent: { color: "green", shape: "pentagon" }, consequent: { color: "yellow", shape: "square" }, successes: 4 },
 ];
 
 function seededRandom(seed: number) {
@@ -57,23 +59,30 @@ function makeStimulus(color: ColorName, random: () => number): Stimulus {
   return { color, shape: SHAPES[Math.floor(random() * SHAPES.length)] };
 }
 
-function sameStimulus(left: Stimulus, right: Stimulus) {
-  return left.color === right.color && left.shape === right.shape;
+function matchesPattern(stimulus: Stimulus, pattern: StimulusPattern) {
+  return (!pattern.color || stimulus.color === pattern.color) && (!pattern.shape || stimulus.shape === pattern.shape);
 }
 
-function randomStimulus(random: () => number, excluded: Stimulus[] = []): Stimulus {
+function randomStimulus(random: () => number, excluded: StimulusPattern[] = []): Stimulus {
   let candidate: Stimulus;
   do {
     candidate = makeStimulus(COLOR_NAMES[Math.floor(random() * COLOR_NAMES.length)], random);
-  } while (excluded.some((item) => sameStimulus(item, candidate)));
+  } while (excluded.some((pattern) => matchesPattern(candidate, pattern)));
   return candidate;
+}
+
+function matchingStimulus(pattern: StimulusPattern, random: () => number): Stimulus {
+  return {
+    color: pattern.color ?? COLOR_NAMES[Math.floor(random() * COLOR_NAMES.length)],
+    shape: pattern.shape ?? SHAPES[Math.floor(random() * SHAPES.length)],
+  };
 }
 
 function buildSequence(
   successes: number,
   seed: number,
-  antecedent: Stimulus = DEFAULT_ANTECEDENT,
-  consequent: Stimulus = DEFAULT_CONSEQUENT,
+  antecedent: StimulusPattern = DEFAULT_ANTECEDENT,
+  consequent: StimulusPattern = DEFAULT_CONSEQUENT,
 ) {
   const random = seededRandom(seed);
   const outcomes = shuffled(Array.from({ length: 10 }, (_, index) => index < successes), random);
@@ -83,8 +92,8 @@ function buildSequence(
     if (index > 0) {
       sequence.push(randomStimulus(random, [antecedent]));
     }
-    sequence.push({ ...antecedent });
-    sequence.push(success ? { ...consequent } : randomStimulus(random, [antecedent, consequent]));
+    sequence.push(matchingStimulus(antecedent, random));
+    sequence.push(success ? matchingStimulus(consequent, random) : randomStimulus(random, [antecedent, consequent]));
   });
 
   return sequence;
@@ -103,8 +112,8 @@ function buildCalibrationSequence() {
 
   shuffled(trials, random).forEach(({ pattern, success }, index) => {
     if (index > 0) sequence.push(randomStimulus(random, antecedents));
-    sequence.push({ ...pattern.antecedent });
-    sequence.push(success ? { ...pattern.consequent } : randomStimulus(random, [...antecedents, pattern.consequent]));
+    sequence.push(matchingStimulus(pattern.antecedent, random));
+    sequence.push(success ? matchingStimulus(pattern.consequent, random) : randomStimulus(random, [...antecedents, pattern.consequent]));
   });
 
   return sequence;
@@ -143,16 +152,34 @@ function StrokeButton({ children, onClick, primary = false, disabled = false }: 
 }
 
 function Shape({ stimulus, mini = false }: { stimulus: Stimulus; mini?: boolean }) {
-  const style = stimulus.shape === "triangle" && !mini
-    ? { color: COLORS[stimulus.color] }
-    : { background: COLORS[stimulus.color] };
+  const color = COLORS[stimulus.color];
+  const polygonPoints: Partial<Record<ShapeName, string>> = {
+    triangle: "60,17 105,99 15,99",
+    square: "20,20 100,20 100,100 20,100",
+    pentagon: "60,14 104,46 87,100 33,100 16,46",
+  };
+
   return (
-    <span
-      className={`${mini ? "mini-shape" : "shape"} ${stimulus.shape}`}
-      style={style}
+    <svg
+      className={mini ? "mini-shape" : "shape"}
+      viewBox="0 0 120 120"
       role={mini ? undefined : "img"}
       aria-label={mini ? undefined : `${stimulus.color} ${stimulus.shape}`}
-    />
+      aria-hidden={mini ? true : undefined}
+    >
+      {stimulus.shape === "circle" ? (
+        <circle cx="60" cy="60" r="44" fill={color} />
+      ) : (
+        <polygon
+          points={polygonPoints[stimulus.shape]}
+          fill={color}
+          stroke={color}
+          strokeWidth="10"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
   );
 }
 
@@ -174,28 +201,38 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
 
   const started = index !== null;
   const complete = started && index >= sequence.length;
-  const dotIndex = started ? Math.min(11, Math.floor(((index ?? 0) / sequence.length) * 12)) : 0;
+  const playing = started && !complete;
+  const progress = playing ? (((index ?? 0) + 1) / sequence.length) * 100 : 0;
 
   return (
     <>
-      <div className="stimulus-card graphite-onboarding-stroke mini-soft-shadow">
-        <div className="stimulus-meta">
-          <span>{label}</span>
-          <span>{complete ? "Complete" : started ? `${Math.min((index ?? 0) + 1, sequence.length)} of ${sequence.length}` : "Ready"}</span>
+      {playing && (
+        <div className="stimulus-focus">
+          <Shape stimulus={sequence[index ?? 0]} />
+          <div
+            className="stimulus-progress"
+            role="progressbar"
+            aria-label="Sequence progress"
+            aria-valuemin={0}
+            aria-valuemax={sequence.length}
+            aria-valuenow={(index ?? 0) + 1}
+          >
+            <span style={{ width: `${progress}%` }} />
+          </div>
         </div>
-        <div className="stimulus-area">
-          {!started && <span className="player-message">Press start when you are ready</span>}
-          {started && !complete && <Shape stimulus={sequence[index ?? 0]} />}
-          {complete && <span className="player-message">Sequence complete</span>}
+      )}
+      {!playing && (
+        <div className="stimulus-card graphite-onboarding-stroke mini-soft-shadow">
+          <div className="stimulus-meta">
+            <span>{label}</span>
+            <span>{complete ? "Complete" : "Ready"}</span>
+          </div>
+          <div className="stimulus-area">
+            <span className="player-message">{complete ? "Sequence complete" : "Press start when you are ready"}</span>
+          </div>
         </div>
-        <div className="sequence-dots" aria-hidden="true">
-          {Array.from({ length: 12 }, (_, position) => <i className={`sequence-dot${position === dotIndex ? " active" : ""}`} key={position} />)}
-        </div>
-      </div>
-      <div className="actions">
-        {!started && <StrokeButton primary onClick={() => setIndex(0)}>Start sequence</StrokeButton>}
-        {started && !complete && <StrokeButton disabled>Playing…</StrokeButton>}
-      </div>
+      )}
+      {!started && <div className="actions"><StrokeButton primary onClick={() => setIndex(0)}>Start sequence</StrokeButton></div>}
     </>
   );
 }
@@ -268,27 +305,19 @@ function progressFor(screen: Screen, round: number) {
 export function ExperimentDemo() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [condition, setCondition] = useState<Condition | null>(null);
-  const [antecedent, setAntecedent] = useState<ColorName>("yellow");
-  const [antecedentShape, setAntecedentShape] = useState<ShapeName>("circle");
-  const [consequent, setConsequent] = useState<ColorName>("green");
-  const [consequentShape, setConsequentShape] = useState<ShapeName>("triangle");
+  const [hypothesisText, setHypothesisText] = useState("");
   const [round, setRound] = useState(0);
   const [ratings, setRatings] = useState<number[]>([]);
   const [confidence, setConfidence] = useState(70);
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [sequenceComplete, setSequenceComplete] = useState(false);
   const calibrationSequence = useMemo(() => buildCalibrationSequence(), []);
-  const antecedentStimulus = useMemo(() => ({ color: antecedent, shape: antecedentShape }), [antecedent, antecedentShape]);
-  const consequentStimulus = useMemo(() => ({ color: consequent, shape: consequentShape }), [consequent, consequentShape]);
-  const hypothesis = `After a ${antecedent} ${antecedentShape}, a ${consequent} ${consequentShape} tends to follow.`;
+  const hypothesis = condition === "provided" ? PROVIDED_HYPOTHESIS : hypothesisText.trim();
 
   const reset = useCallback(() => {
     setScreen("setup");
     setCondition(null);
-    setAntecedent("yellow");
-    setAntecedentShape("circle");
-    setConsequent("green");
-    setConsequentShape("triangle");
+    setHypothesisText("");
     setRound(0);
     setRatings([]);
     setConfidence(70);
@@ -298,9 +327,10 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-3-compound-patterns",
+      version: "prototype-4-freeform-patterns",
       condition,
-      hypothesis: { antecedent: antecedentStimulus, consequent: consequentStimulus, text: hypothesis },
+      hypothesis,
+      standardizedEvidenceRule: PROVIDED_HYPOTHESIS,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
       diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
       startedAt,
@@ -313,21 +343,21 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [antecedentStimulus, condition, consequentStimulus, hypothesis, ratings, startedAt]);
+  }, [condition, hypothesis, ratings, startedAt]);
 
   const diagnosticPairs = useMemo(() => {
-    const sequence = buildSequence(8, 1197, antecedentStimulus, consequentStimulus);
+    const sequence = buildSequence(8, 1197);
     const pairs: [Stimulus, Stimulus][] = [];
     for (let index = 0; index < sequence.length - 1; index += 1) {
-      if (sameStimulus(sequence[index], antecedentStimulus)) pairs.push([sequence[index], sequence[index + 1]]);
+      if (matchesPattern(sequence[index], DEFAULT_ANTECEDENT)) pairs.push([sequence[index], sequence[index + 1]]);
     }
     return pairs.slice(0, 10);
-  }, [antecedentStimulus, consequentStimulus]);
+  }, []);
 
   const evidenceSequence = useMemo(() => {
     if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73, antecedentStimulus, consequentStimulus);
-  }, [antecedentStimulus, consequentStimulus, round]);
+    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73);
+  }, [round]);
 
   const submitEvidenceRating = () => {
     setRatings((current) => [...current, confidence]);
@@ -340,7 +370,6 @@ export function ExperimentDemo() {
     <main className="shell">
       <header className="topbar">
         <div className="wordmark">EM2</div>
-        <div className="study-pill">Belief updating study</div>
         {screen !== "setup" ? <button className="reset-link" onClick={reset}>Exit demo</button> : <span />}
       </header>
 
@@ -376,7 +405,7 @@ export function ExperimentDemo() {
           <>
             <p className="eyebrow">Before you begin</p>
             <h1>Find a pattern</h1>
-            <p className="lede">Watch both color and shape. Look for combinations that predict what comes next.</p>
+            <p className="lede">A pattern can involve shape, color, or both.</p>
             <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Remember</span><p className="belief-text">Patterns do not need to hold every time.</p></div>
             <div className="actions"><StrokeButton primary onClick={() => setScreen("calibration")}>I understand</StrokeButton></div>
           </>
@@ -406,29 +435,27 @@ export function ExperimentDemo() {
           <>
             <p className="eyebrow">Your observation</p>
             <h1>What did you notice?</h1>
-            <p className="lede">Build one rule using both color and shape.</p>
+            <p className="lede">Describe the pattern in your own words.</p>
             <div className="form-card graphite-onboarding-stroke mini-soft-shadow">
-              <label className="field-label">Your hypothesis</label>
-              <div className="hypothesis-builder">
-                <span>After a</span>
-                <select className="select" value={antecedent} onChange={(event) => setAntecedent(event.target.value as ColorName)}>
-                  {COLOR_NAMES.map((color) => <option value={color} key={color}>{color[0].toUpperCase() + color.slice(1)}</option>)}
-                </select>
-                <select className="select" value={antecedentShape} onChange={(event) => setAntecedentShape(event.target.value as ShapeName)}>
-                  {SHAPES.map((shape) => <option value={shape} key={shape}>{shape[0].toUpperCase() + shape.slice(1)}</option>)}
-                </select>
-                <span>, a</span>
-                <select className="select" value={consequent} onChange={(event) => setConsequent(event.target.value as ColorName)}>
-                  {COLOR_NAMES.map((color) => <option value={color} key={color}>{color[0].toUpperCase() + color.slice(1)}</option>)}
-                </select>
-                <select className="select" value={consequentShape} onChange={(event) => setConsequentShape(event.target.value as ShapeName)}>
-                  {SHAPES.map((shape) => <option value={shape} key={shape}>{shape[0].toUpperCase() + shape.slice(1)}</option>)}
-                </select>
-                <span>tends to follow.</span>
+              <label className="field-label" htmlFor="hypothesis">Your hypothesis</label>
+              <div className="input-stroke">
+                <textarea
+                  id="hypothesis"
+                  className="hypothesis-input"
+                  value={hypothesisText}
+                  rows={5}
+                  placeholder="For example: A circle is usually followed by a triangle, no matter what color either shape is."
+                  aria-describedby="hypothesis-help"
+                  onChange={(event) => setHypothesisText(event.target.value)}
+                  onInput={(event) => {
+                    event.currentTarget.style.height = "auto";
+                    event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
+                  }}
+                />
               </div>
-              {sameStimulus(antecedentStimulus, consequentStimulus) && <p className="form-error">Choose two different objects.</p>}
+              <p className="field-help" id="hypothesis-help">Use as much detail as you need. Color is optional.</p>
             </div>
-            <div className="actions"><StrokeButton primary disabled={sameStimulus(antecedentStimulus, consequentStimulus)} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
+            <div className="actions"><StrokeButton primary disabled={!hypothesisText.trim()} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
           </>
         )}
 
@@ -440,7 +467,7 @@ export function ExperimentDemo() {
             <div className="belief-card graphite-onboarding-stroke mini-soft-shadow"><span className="belief-label">Current hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <div className="review-grid">
               {diagnosticPairs.map(([first, second], index) => (
-                <div className={`review-pair${sameStimulus(second, consequentStimulus) ? " hit" : ""}`} key={index}>
+                <div className={`review-pair${matchesPattern(second, DEFAULT_CONSEQUENT) ? " hit" : ""}`} key={index}>
                   <Shape stimulus={first} mini /><span className="arrow">→</span><Shape stimulus={second} mini />
                 </div>
               ))}
