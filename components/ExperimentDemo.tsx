@@ -145,16 +145,15 @@ function Icon({ name }: { name: IconName }) {
   );
 }
 
-function StrokeButton({ children, onClick, primary = false, disabled = false }: {
+function StrokeButton({ children, onClick, disabled = false }: {
   children: React.ReactNode;
   onClick?: () => void;
-  primary?: boolean;
   disabled?: boolean;
 }) {
   return (
-    <span className="inline-flex rounded-[10px] bg-linear-to-b from-[#f3f3f3] via-[#f3f3f3] to-[#eaeaea] p-px has-[button:disabled]:bg-[#e5e4e1]">
+    <span className={`inline-flex w-fit rounded-[10px] p-px ${disabled ? "bg-[#e4e4e2]" : "bg-linear-to-b from-[#f3f3f3] via-[#f3f3f3] to-[#eaeaea]"}`}>
       <button
-        className={`min-h-9 cursor-pointer rounded-[9px] border-0 px-3.5 py-2.5 text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.08)] transition-colors duration-150 active:translate-y-px disabled:cursor-not-allowed disabled:bg-[#f4f4f2] disabled:text-[#adaca8] disabled:shadow-none motion-reduce:transition-none ${primary ? "bg-[#37352f] text-white enabled:hover:bg-[#24231f]" : "bg-white text-[#2c2c2b] enabled:hover:bg-[#f5f5f3]"}`}
+        className="flex h-full w-full cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[9px] border-0 bg-white px-3 py-2 text-xs text-[#2c2c2b] shadow-sm transition-colors duration-200 enabled:hover:bg-neutral-100 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400 disabled:opacity-100 disabled:shadow-none motion-reduce:transition-none"
         onClick={onClick}
         disabled={disabled}
         type="button"
@@ -162,6 +161,26 @@ function StrokeButton({ children, onClick, primary = false, disabled = false }: 
         {children}
       </button>
     </span>
+  );
+}
+
+function ProgressBar({ value, className = "", label = "Progress" }: { value: number; className?: string; label?: string }) {
+  const percentage = Math.max(0, Math.min(100, value));
+
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={Math.round(percentage)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className={`h-1 overflow-hidden rounded-full bg-black/5 ${className}`}
+    >
+      <div
+        className="h-full rounded-full bg-neutral-800 transition-[width] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0"
+        style={{ width: `${percentage}%` }}
+      />
+    </div>
   );
 }
 
@@ -223,19 +242,11 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
       {playing && (
         <div className="fixed inset-0 z-100 grid place-items-center bg-[#fbfbfa]">
           <Shape stimulus={sequence[index ?? 0]} />
-          <div
-            className="absolute right-[clamp(24px,7vw,96px)] bottom-[clamp(28px,6vh,64px)] left-[clamp(24px,7vw,96px)] h-[3px] overflow-hidden rounded-full bg-black/[0.07]"
-            role="progressbar"
-            aria-label="Sequence progress"
-            aria-valuemin={0}
-            aria-valuemax={sequence.length}
-            aria-valuenow={(index ?? 0) + 1}
-          >
-            <span
-              className="block h-full rounded-[inherit] bg-[#917aa4] transition-[width] duration-200 motion-reduce:transition-none"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+          <ProgressBar
+            value={progress}
+            label="Sequence progress"
+            className="absolute right-[clamp(24px,7vw,96px)] bottom-[clamp(28px,6vh,64px)] left-[clamp(24px,7vw,96px)]"
+          />
         </div>
       )}
       {!playing && (
@@ -249,7 +260,7 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
           </div>
         </div>
       )}
-      {!started && <div className="mt-8 flex justify-end gap-2.5"><StrokeButton primary onClick={() => setIndex(0)}>Start sequence</StrokeButton></div>}
+      {!started && <div className="mt-8 flex justify-end gap-2.5"><StrokeButton onClick={() => setIndex(0)}>Start sequence</StrokeButton></div>}
     </>
   );
 }
@@ -417,7 +428,7 @@ export function ExperimentDemo() {
               ))}
             </div>
             <div className="mt-[26px] rounded-lg border border-[#715d82]/[0.12] bg-[#f5f2f7] px-4 py-3.5 text-xs leading-[1.55] text-[#675a70]">Condition assignment is visible in demo mode.</div>
-            <div className={ACTIONS}><StrokeButton primary disabled={!condition} onClick={() => setScreen("intro")}>Begin</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton disabled={!condition} onClick={() => setScreen("intro")}>Begin</StrokeButton></div>
           </>
         )}
 
@@ -427,7 +438,7 @@ export function ExperimentDemo() {
             <h1 className={HEADING}>Find a pattern</h1>
             <p className={LEDE}>A pattern can involve shape, color, or both.</p>
             <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Remember</span><p className="mt-3 text-[19px] leading-normal font-medium text-[#2c2c2b]">Patterns do not need to hold every time.</p></div>
-            <div className={ACTIONS}><StrokeButton primary onClick={() => setScreen("calibration")}>I understand</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton onClick={() => setScreen("calibration")}>I understand</StrokeButton></div>
           </>
         )}
 
@@ -437,7 +448,7 @@ export function ExperimentDemo() {
             <h1 className={HEADING}>Watch closely</h1>
             <p className={LEDE}>Each object stays visible long enough to inspect both features. The sequence takes about a minute.</p>
             <SequencePlayer sequence={calibrationSequence} label="Observation 1" onComplete={() => setSequenceComplete(true)} />
-            {sequenceComplete && <div className={`${ACTIONS} mt-3.5`}><StrokeButton primary onClick={() => { setSequenceComplete(false); setScreen("hypothesis"); }}>Continue</StrokeButton></div>}
+            {sequenceComplete && <div className={`${ACTIONS} mt-3.5`}><StrokeButton onClick={() => { setSequenceComplete(false); setScreen("hypothesis"); }}>Continue</StrokeButton></div>}
           </>
         )}
 
@@ -447,7 +458,7 @@ export function ExperimentDemo() {
             <h1 className={HEADING}>Consider this pattern</h1>
             <p className={LEDE}>Proposed by the matched participant.</p>
             <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Provided hypothesis</span><p className="mt-3 whitespace-pre-wrap break-words text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
-            <div className={ACTIONS}><StrokeButton primary onClick={() => setScreen("review")}>Continue</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton onClick={() => setScreen("review")}>Continue</StrokeButton></div>
           </>
         )}
 
@@ -475,7 +486,7 @@ export function ExperimentDemo() {
               </div>
               <p className="mx-0.5 mt-[9px] text-[11px] leading-[1.45] text-[#a09f9c]" id="hypothesis-help">Use as much detail as you need. Color is optional.</p>
             </div>
-            <div className={ACTIONS}><StrokeButton primary disabled={!hypothesisText.trim()} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton disabled={!hypothesisText.trim()} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
           </>
         )}
 
@@ -492,7 +503,7 @@ export function ExperimentDemo() {
                 </div>
               ))}
             </div>
-            <div className={ACTIONS}><StrokeButton primary onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
           </>
         )}
 
@@ -503,7 +514,7 @@ export function ExperimentDemo() {
             <p className={LEDE}>Does this pattern describe the sequence?</p>
             <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Your hypothesis</span><p className="mt-3 whitespace-pre-wrap break-words text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
             <ConfidenceControl value={confidence} onChange={setConfidence} />
-            <div className={ACTIONS}><StrokeButton primary onClick={() => { setRatings([confidence]); setRound(0); setSequenceComplete(false); setScreen("evidence"); }}>Submit rating</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton onClick={() => { setRatings([confidence]); setRound(0); setSequenceComplete(false); setScreen("evidence"); }}>Submit rating</StrokeButton></div>
           </>
         )}
 
@@ -516,7 +527,7 @@ export function ExperimentDemo() {
             {sequenceComplete && (
               <>
                 <div className={FORM_CARD}><label className={FIELD_LABEL}>Update your confidence</label><ConfidenceControl value={confidence} onChange={setConfidence} /></div>
-                <div className={`${ACTIONS} mt-3.5`}><StrokeButton primary onClick={submitEvidenceRating}>{round === EVIDENCE_RATES.length - 1 ? "Finish" : "Submit and continue"}</StrokeButton></div>
+                <div className={`${ACTIONS} mt-3.5`}><StrokeButton onClick={submitEvidenceRating}>{round === EVIDENCE_RATES.length - 1 ? "Finish" : "Submit and continue"}</StrokeButton></div>
               </>
             )}
           </>
@@ -533,11 +544,11 @@ export function ExperimentDemo() {
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings.at(-1)}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Final confidence</div></div>
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{(ratings.at(-1) ?? 0) - ratings[0] > 0 ? "+" : ""}{(ratings.at(-1) ?? 0) - ratings[0]}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Total change</div></div>
             </div>
-            <div className={ACTIONS}><StrokeButton onClick={reset}>Try other condition</StrokeButton><StrokeButton primary onClick={downloadData}>Download session data</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton onClick={reset}>Try other condition</StrokeButton><StrokeButton onClick={downloadData}>Download session data</StrokeButton></div>
           </>
         )}
 
-        <div className="mt-[38px] h-[3px] w-full overflow-hidden rounded-full bg-black/[0.06]"><div className="h-full rounded-[inherit] bg-[#917aa4] transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${progressFor(screen, round)}%` }} /></div>
+        <ProgressBar value={progressFor(screen, round)} label="Study progress" className="mt-4" />
       </section>
     </main>
   );
