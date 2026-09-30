@@ -12,6 +12,7 @@ const COLORS = {
 const SHAPES = ["circle", "square", "triangle", "diamond"] as const;
 const COLOR_NAMES = Object.keys(COLORS) as ColorName[];
 const EVIDENCE_RATES = [80, 70, 50, 30, 20] as const;
+const STIMULUS_INTERVAL_MS = 1400;
 
 type ColorName = keyof typeof COLORS;
 type ShapeName = (typeof SHAPES)[number];
@@ -19,6 +20,18 @@ type Condition = "generated" | "provided";
 type Screen = "setup" | "intro" | "calibration" | "hypothesis" | "review" | "confidence" | "evidence" | "results";
 type Stimulus = { color: ColorName; shape: ShapeName };
 type IconName = "pencil" | "receive";
+
+const DEFAULT_ANTECEDENT: Stimulus = { color: "yellow", shape: "circle" };
+const DEFAULT_CONSEQUENT: Stimulus = { color: "green", shape: "triangle" };
+const CALIBRATION_PATTERNS: Array<{
+  antecedent: Stimulus;
+  consequent: Stimulus;
+  successes: number;
+}> = [
+  { antecedent: DEFAULT_ANTECEDENT, consequent: DEFAULT_CONSEQUENT, successes: 5 },
+  { antecedent: { color: "red", shape: "square" }, consequent: { color: "blue", shape: "diamond" }, successes: 5 },
+  { antecedent: { color: "green", shape: "diamond" }, consequent: { color: "yellow", shape: "square" }, successes: 4 },
+];
 
 function seededRandom(seed: number) {
   let value = seed >>> 0;
@@ -44,19 +57,54 @@ function makeStimulus(color: ColorName, random: () => number): Stimulus {
   return { color, shape: SHAPES[Math.floor(random() * SHAPES.length)] };
 }
 
-function buildSequence(successes: number, seed: number, antecedent: ColorName = "yellow", consequent: ColorName = "green") {
+function sameStimulus(left: Stimulus, right: Stimulus) {
+  return left.color === right.color && left.shape === right.shape;
+}
+
+function randomStimulus(random: () => number, excluded: Stimulus[] = []): Stimulus {
+  let candidate: Stimulus;
+  do {
+    candidate = makeStimulus(COLOR_NAMES[Math.floor(random() * COLOR_NAMES.length)], random);
+  } while (excluded.some((item) => sameStimulus(item, candidate)));
+  return candidate;
+}
+
+function buildSequence(
+  successes: number,
+  seed: number,
+  antecedent: Stimulus = DEFAULT_ANTECEDENT,
+  consequent: Stimulus = DEFAULT_CONSEQUENT,
+) {
   const random = seededRandom(seed);
   const outcomes = shuffled(Array.from({ length: 10 }, (_, index) => index < successes), random);
-  const alternatives = COLOR_NAMES.filter((color) => color !== consequent && color !== antecedent);
   const sequence: Stimulus[] = [];
 
   outcomes.forEach((success, index) => {
     if (index > 0) {
-      const fillers = COLOR_NAMES.filter((color) => color !== antecedent);
-      sequence.push(makeStimulus(fillers[Math.floor(random() * fillers.length)], random));
+      sequence.push(randomStimulus(random, [antecedent]));
     }
-    sequence.push(makeStimulus(antecedent, random));
-    sequence.push(makeStimulus(success ? consequent : alternatives[Math.floor(random() * alternatives.length)], random));
+    sequence.push({ ...antecedent });
+    sequence.push(success ? { ...consequent } : randomStimulus(random, [antecedent, consequent]));
+  });
+
+  return sequence;
+}
+
+function buildCalibrationSequence() {
+  const random = seededRandom(1197);
+  const trials = CALIBRATION_PATTERNS.flatMap((pattern) =>
+    shuffled(
+      Array.from({ length: 6 }, (_, index) => ({ pattern, success: index < pattern.successes })),
+      random,
+    ),
+  );
+  const sequence: Stimulus[] = [];
+  const antecedents = CALIBRATION_PATTERNS.map((pattern) => pattern.antecedent);
+
+  shuffled(trials, random).forEach(({ pattern, success }, index) => {
+    if (index > 0) sequence.push(randomStimulus(random, antecedents));
+    sequence.push({ ...pattern.antecedent });
+    sequence.push(success ? { ...pattern.consequent } : randomStimulus(random, [...antecedents, pattern.consequent]));
   });
 
   return sequence;
@@ -120,7 +168,7 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
       const timeout = window.setTimeout(() => completeRef.current(), 450);
       return () => window.clearTimeout(timeout);
     }
-    const timeout = window.setTimeout(() => setIndex((current) => (current ?? 0) + 1), 430);
+    const timeout = window.setTimeout(() => setIndex((current) => (current ?? 0) + 1), STIMULUS_INTERVAL_MS);
     return () => window.clearTimeout(timeout);
   }, [index, sequence.length]);
 
@@ -221,20 +269,26 @@ export function ExperimentDemo() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [condition, setCondition] = useState<Condition | null>(null);
   const [antecedent, setAntecedent] = useState<ColorName>("yellow");
+  const [antecedentShape, setAntecedentShape] = useState<ShapeName>("circle");
   const [consequent, setConsequent] = useState<ColorName>("green");
+  const [consequentShape, setConsequentShape] = useState<ShapeName>("triangle");
   const [round, setRound] = useState(0);
   const [ratings, setRatings] = useState<number[]>([]);
   const [confidence, setConfidence] = useState(70);
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [sequenceComplete, setSequenceComplete] = useState(false);
-  const calibrationSequence = useMemo(() => buildSequence(8, 1197), []);
-  const hypothesis = `When a ${antecedent} shape appears, a ${consequent} shape tends to appear next.`;
+  const calibrationSequence = useMemo(() => buildCalibrationSequence(), []);
+  const antecedentStimulus = useMemo(() => ({ color: antecedent, shape: antecedentShape }), [antecedent, antecedentShape]);
+  const consequentStimulus = useMemo(() => ({ color: consequent, shape: consequentShape }), [consequent, consequentShape]);
+  const hypothesis = `After a ${antecedent} ${antecedentShape}, a ${consequent} ${consequentShape} tends to follow.`;
 
   const reset = useCallback(() => {
     setScreen("setup");
     setCondition(null);
     setAntecedent("yellow");
+    setAntecedentShape("circle");
     setConsequent("green");
+    setConsequentShape("triangle");
     setRound(0);
     setRatings([]);
     setConfidence(70);
@@ -244,9 +298,9 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-2-nextjs",
+      version: "prototype-3-compound-patterns",
       condition,
-      hypothesis: { antecedent, consequent, text: hypothesis },
+      hypothesis: { antecedent: antecedentStimulus, consequent: consequentStimulus, text: hypothesis },
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
       diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
       startedAt,
@@ -259,21 +313,21 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [antecedent, condition, consequent, hypothesis, ratings, startedAt]);
+  }, [antecedentStimulus, condition, consequentStimulus, hypothesis, ratings, startedAt]);
 
   const diagnosticPairs = useMemo(() => {
-    const sequence = buildSequence(8, 1197, antecedent, consequent);
+    const sequence = buildSequence(8, 1197, antecedentStimulus, consequentStimulus);
     const pairs: [Stimulus, Stimulus][] = [];
     for (let index = 0; index < sequence.length - 1; index += 1) {
-      if (sequence[index].color === antecedent) pairs.push([sequence[index], sequence[index + 1]]);
+      if (sameStimulus(sequence[index], antecedentStimulus)) pairs.push([sequence[index], sequence[index + 1]]);
     }
     return pairs.slice(0, 10);
-  }, [antecedent, consequent]);
+  }, [antecedentStimulus, consequentStimulus]);
 
   const evidenceSequence = useMemo(() => {
     if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73, antecedent, consequent);
-  }, [antecedent, consequent, round]);
+    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73, antecedentStimulus, consequentStimulus);
+  }, [antecedentStimulus, consequentStimulus, round]);
 
   const submitEvidenceRating = () => {
     setRatings((current) => [...current, confidence]);
@@ -290,16 +344,16 @@ export function ExperimentDemo() {
         {screen !== "setup" ? <button className="reset-link" onClick={reset}>Exit demo</button> : <span />}
       </header>
 
-      <section className={`stage${["calibration", "review", "evidence", "results"].includes(screen) ? " wide" : ""}`} key={`${screen}-${round}`}>
+      <section className={`stage${["calibration", "hypothesis", "review", "evidence", "results"].includes(screen) ? " wide" : ""}`} key={`${screen}-${round}`}>
         {screen === "setup" && (
           <>
             <p className="eyebrow">Interactive prototype</p>
-            <h1>Choose a participant condition</h1>
-            <p className="lede">This demo lets you walk through either side of a yoked pair. Both conditions receive the same calibration sequence and the same subsequent evidence.</p>
+            <h1>Choose a condition</h1>
+            <p className="lede">Both conditions see the same evidence.</p>
             <div className="option-list">
               {([
-                ["generated", "pencil", "Self-generated belief", "Discover and formulate a regularity in the sequence."],
-                ["provided", "receive", "Provided belief", "Evaluate a regularity supplied by the matched participant."],
+                ["generated", "pencil", "Self-generated", "Find and describe a pattern."],
+                ["provided", "receive", "Provided", "Evaluate a matched pattern."],
               ] as const).map(([value, iconName, title, description]) => (
                 <button
                   className={`option-card${condition === value ? " selected" : ""}`}
@@ -313,7 +367,7 @@ export function ExperimentDemo() {
                 </button>
               ))}
             </div>
-            <div className="note">Demo mode exposes the condition selector. In a study deployment, condition and pair assignment would happen before this screen.</div>
+            <div className="note">Condition assignment is visible in demo mode.</div>
             <div className="actions"><StrokeButton primary disabled={!condition} onClick={() => setScreen("intro")}>Begin</StrokeButton></div>
           </>
         )}
@@ -321,9 +375,9 @@ export function ExperimentDemo() {
         {screen === "intro" && (
           <>
             <p className="eyebrow">Before you begin</p>
-            <h1>Look for patterns in what follows</h1>
-            <p className="lede">You will see a sequence of colored geometric shapes, one at a time. There may be regularities in which colors or shapes tend to follow one another.</p>
-            <div className="belief-card"><span className="belief-label">Important</span><p className="belief-text">Any pattern may be probabilistic. It does not need to hold every time to be meaningful.</p></div>
+            <h1>Find a pattern</h1>
+            <p className="lede">Watch both color and shape. Look for combinations that predict what comes next.</p>
+            <div className="belief-card"><span className="belief-label">Remember</span><p className="belief-text">Patterns do not need to hold every time.</p></div>
             <div className="actions"><StrokeButton primary onClick={() => setScreen("calibration")}>I understand</StrokeButton></div>
           </>
         )}
@@ -332,7 +386,7 @@ export function ExperimentDemo() {
           <>
             <p className="eyebrow">Calibration sequence</p>
             <h1>Watch closely</h1>
-            <p className="lede">Try to notice a simple relationship between consecutive colors or shapes. The sequence takes about twelve seconds.</p>
+            <p className="lede">Each object stays visible long enough to inspect both features. The sequence takes about a minute.</p>
             <SequencePlayer sequence={calibrationSequence} label="Observation 1" onComplete={() => setSequenceComplete(true)} />
             {sequenceComplete && <div className="actions continuation"><StrokeButton primary onClick={() => { setSequenceComplete(false); setScreen("hypothesis"); }}>Continue</StrokeButton></div>}
           </>
@@ -341,8 +395,8 @@ export function ExperimentDemo() {
         {screen === "hypothesis" && condition === "provided" && (
           <>
             <p className="eyebrow">A possible regularity</p>
-            <h1>Consider this hypothesis</h1>
-            <p className="lede">A participant who viewed the same calibration sequence proposed the following pattern.</p>
+            <h1>Consider this pattern</h1>
+            <p className="lede">Proposed by the matched participant.</p>
             <div className="belief-card"><span className="belief-label">Provided hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <div className="actions"><StrokeButton primary onClick={() => setScreen("review")}>Continue</StrokeButton></div>
           </>
@@ -351,36 +405,42 @@ export function ExperimentDemo() {
         {screen === "hypothesis" && condition === "generated" && (
           <>
             <p className="eyebrow">Your observation</p>
-            <h1>Which pattern did you notice?</h1>
-            <p className="lede">Use the sentence below to record one simple color relationship. Choose the pattern that seemed most convincing to you.</p>
+            <h1>What did you notice?</h1>
+            <p className="lede">Build one rule using both color and shape.</p>
             <div className="form-card">
               <label className="field-label">Your hypothesis</label>
               <div className="hypothesis-builder">
-                <span>When a</span>
+                <span>After a</span>
                 <select className="select" value={antecedent} onChange={(event) => setAntecedent(event.target.value as ColorName)}>
                   {COLOR_NAMES.map((color) => <option value={color} key={color}>{color[0].toUpperCase() + color.slice(1)}</option>)}
                 </select>
-                <span>shape appears, a</span>
+                <select className="select" value={antecedentShape} onChange={(event) => setAntecedentShape(event.target.value as ShapeName)}>
+                  {SHAPES.map((shape) => <option value={shape} key={shape}>{shape[0].toUpperCase() + shape.slice(1)}</option>)}
+                </select>
+                <span>, a</span>
                 <select className="select" value={consequent} onChange={(event) => setConsequent(event.target.value as ColorName)}>
                   {COLOR_NAMES.map((color) => <option value={color} key={color}>{color[0].toUpperCase() + color.slice(1)}</option>)}
                 </select>
-                <span>shape tends to appear next.</span>
+                <select className="select" value={consequentShape} onChange={(event) => setConsequentShape(event.target.value as ShapeName)}>
+                  {SHAPES.map((shape) => <option value={shape} key={shape}>{shape[0].toUpperCase() + shape.slice(1)}</option>)}
+                </select>
+                <span>tends to follow.</span>
               </div>
-              {antecedent === consequent && <p className="form-error">Choose two different colors.</p>}
+              {sameStimulus(antecedentStimulus, consequentStimulus) && <p className="form-error">Choose two different objects.</p>}
             </div>
-            <div className="actions"><StrokeButton primary disabled={antecedent === consequent} onClick={() => setScreen("review")}>Save hypothesis</StrokeButton></div>
+            <div className="actions"><StrokeButton primary disabled={sameStimulus(antecedentStimulus, consequentStimulus)} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
           </>
         )}
 
         {screen === "review" && (
           <>
             <p className="eyebrow">Standardized review</p>
-            <h1>Review the evidence for the hypothesis</h1>
-            <p className="lede">Both members of the yoked pair receive this same review. Each tile shows an occurrence of the first color and the color that immediately followed it.</p>
+            <h1>Check the pattern</h1>
+            <p className="lede">The matched pair receives the same review.</p>
             <div className="belief-card"><span className="belief-label">Current hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <div className="review-grid">
               {diagnosticPairs.map(([first, second], index) => (
-                <div className={`review-pair${second.color === consequent ? " hit" : ""}`} key={index}>
+                <div className={`review-pair${sameStimulus(second, consequentStimulus) ? " hit" : ""}`} key={index}>
                   <Shape stimulus={first} mini /><span className="arrow">→</span><Shape stimulus={second} mini />
                 </div>
               ))}
@@ -392,8 +452,8 @@ export function ExperimentDemo() {
         {screen === "confidence" && (
           <>
             <p className="eyebrow">Confidence rating</p>
-            <h1>How confident are you in this regularity?</h1>
-            <p className="lede">How confident are you that this pattern genuinely describes the process generating the sequence?</p>
+            <h1>How confident are you?</h1>
+            <p className="lede">Does this pattern describe the sequence?</p>
             <div className="belief-card"><span className="belief-label">Your hypothesis</span><p className="belief-text">{hypothesis}</p></div>
             <ConfidenceControl value={confidence} onChange={setConfidence} />
             <div className="actions"><StrokeButton primary onClick={() => { setRatings([confidence]); setRound(0); setSequenceComplete(false); setScreen("evidence"); }}>Submit rating</StrokeButton></div>
@@ -403,8 +463,8 @@ export function ExperimentDemo() {
         {screen === "evidence" && (
           <>
             <span className="round-badge">Evidence block {round + 1} of {EVIDENCE_RATES.length}</span>
-            <h1>Continue observing</h1>
-            <p className="lede">Watch the new sequence, keeping your current hypothesis in mind. The underlying probabilities are not shown during the study.</p>
+            <h1>Watch again</h1>
+            <p className="lede">Keep your pattern in mind.</p>
             <SequencePlayer sequence={evidenceSequence} label={`New evidence ${round + 1}`} onComplete={() => { setConfidence(ratings.at(-1) ?? 70); setSequenceComplete(true); }} />
             {sequenceComplete && (
               <>
@@ -418,8 +478,8 @@ export function ExperimentDemo() {
         {screen === "results" && (
           <>
             <p className="eyebrow">Demo complete</p>
-            <h1>Your belief-updating trajectory</h1>
-            <p className="lede">This participant-facing summary is useful for the prototype. A production study can instead show a neutral completion screen while storing the same measurements privately.</p>
+            <h1>Your confidence over time</h1>
+            <p className="lede">Prototype summary.</p>
             <div className="chart-card"><Chart ratings={ratings} /></div>
             <div className="summary-row">
               <div className="summary-item"><div className="summary-value">{ratings[0]}</div><div className="summary-label">Initial confidence</div></div>

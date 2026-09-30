@@ -6,7 +6,10 @@ A Next.js App Router prototype for the yoked belief-authorship experiment.
 
 - Demo selector for self-generated and provided-belief conditions
 - Identical, seeded calibration evidence across conditions
+- Combined color-and-shape patterns (for example, yellow circle → green triangle)
+- Three discoverable compound patterns in the calibration sequence
 - Constrained hypothesis entry for the self-generated condition
+- Slower 1.4-second stimulus pacing for deliberate inspection
 - Standardized evidence review for both members of a yoked pair
 - Initial 0–100 confidence rating
 - Five evidence blocks with declining diagnostic support
