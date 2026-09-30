@@ -20,28 +20,41 @@ type Condition = "generated" | "provided";
 type Screen = "setup" | "intro" | "calibration" | "hypothesis" | "review" | "confidence" | "evidence" | "results";
 type Stimulus = { color: ColorName; shape: ShapeName };
 type StimulusPattern = { color?: ColorName; shape?: ShapeName };
+type PatternStep = { id: number; color: ColorName | "any"; shape: ShapeName | "any" };
 type IconName = "pencil" | "receive";
 
-const DEFAULT_ANTECEDENT: StimulusPattern = { shape: "circle" };
-const DEFAULT_CONSEQUENT: StimulusPattern = { shape: "triangle" };
-const PROVIDED_HYPOTHESIS = "A circle tends to be followed by a triangle, regardless of color.";
+const COLOR_OPTIONS: Array<{ value: ColorName | "any"; label: string }> = [
+  { value: "any", label: "Any color" },
+  ...COLOR_NAMES.map((color) => ({ value: color, label: color })),
+];
+const SHAPE_OPTIONS: Array<{ value: ShapeName | "any"; label: string }> = [
+  { value: "any", label: "Any shape" },
+  ...SHAPES.map((shape) => ({ value: shape, label: shape })),
+];
+
+const DEFAULT_MACHINE_PATTERN: StimulusPattern[] = [{ shape: "circle" }, { shape: "triangle" }];
+const DEFAULT_PATTERN_STEPS: PatternStep[] = [
+  { id: 1, color: "any", shape: "circle" },
+  { id: 2, color: "any", shape: "triangle" },
+];
+const PROVIDED_HYPOTHESIS = "Circle (any color) → triangle (any color)";
 const MINI_SOFT_SHADOW = "shadow-[0_5px_10px_rgba(0,0,0,0.03),0_0.25px_0.5px_rgba(0,0,0,0.05),0_1px_1.5px_rgba(0,0,0,0.04),0_2.5px_5px_rgba(0,0,0,0.04),0_0.5px_1px_rgba(0,0,0,0.02)]";
 const GRAPHITE_CARD = `border-[0.5px] border-black/[0.08] ${MINI_SOFT_SHADOW}`;
 const HEADING = "m-0 text-[clamp(26px,4vw,34px)] font-semibold leading-[1.18] text-[#2c2c2b]";
-const LEDE = "mt-3.5 max-w-[520px] text-sm leading-[1.7] text-[#777673]";
+const LEDE = "mt-3.5 max-w-130 text-sm leading-[1.7] text-[#777673]";
 const EYEBROW = "mb-3 text-[11px] font-semibold text-[#715d82]";
 const ACTIONS = "mt-8 flex justify-end gap-2.5";
-const BELIEF_CARD = `mt-[30px] rounded-[13px] bg-linear-to-br from-white to-[#faf8fb] p-7 ${GRAPHITE_CARD}`;
+const BELIEF_CARD = `mt-7.5 rounded-[13px] bg-linear-to-br from-white to-[#faf8fb] p-7 ${GRAPHITE_CARD}`;
 const FORM_CARD = `mt-8 rounded-xl bg-white p-6 ${GRAPHITE_CARD}`;
-const FIELD_LABEL = "mb-[9px] block text-[11px] font-semibold text-[#777673]";
+const FIELD_LABEL = "mb-2.25 block text-[11px] font-semibold text-[#777673]";
 const CALIBRATION_PATTERNS: Array<{
   antecedent: StimulusPattern;
   consequent: StimulusPattern;
   successes: number;
 }> = [
-  { antecedent: DEFAULT_ANTECEDENT, consequent: DEFAULT_CONSEQUENT, successes: 5 },
-  { antecedent: { color: "red" }, consequent: { color: "blue" }, successes: 5 },
-  { antecedent: { color: "green", shape: "pentagon" }, consequent: { color: "yellow", shape: "square" }, successes: 4 },
+  { antecedent: DEFAULT_MACHINE_PATTERN[0], consequent: DEFAULT_MACHINE_PATTERN[1], successes: 6 },
+  { antecedent: { color: "red" }, consequent: { color: "blue" }, successes: 6 },
+  { antecedent: { color: "green", shape: "pentagon" }, consequent: { color: "yellow", shape: "square" }, successes: 5 },
 ];
 
 function seededRandom(seed: number) {
@@ -87,25 +100,42 @@ function matchingStimulus(pattern: StimulusPattern, random: () => number): Stimu
   };
 }
 
-function buildSequence(
-  successes: number,
-  seed: number,
-  antecedent: StimulusPattern = DEFAULT_ANTECEDENT,
-  consequent: StimulusPattern = DEFAULT_CONSEQUENT,
-) {
+function buildPatternTrials(successes: number, seed: number, pattern: StimulusPattern[]) {
   const random = seededRandom(seed);
   const outcomes = shuffled(Array.from({ length: 10 }, (_, index) => index < successes), random);
+
+  return outcomes.map((success) => {
+    const failingIndex = success ? -1 : 1 + Math.floor(random() * (pattern.length - 1));
+    return pattern.map((step, index) => (
+      index === failingIndex ? randomStimulus(random, [step]) : matchingStimulus(step, random)
+    ));
+  });
+}
+
+function buildSequence(successes: number, seed: number, pattern: StimulusPattern[] = DEFAULT_MACHINE_PATTERN) {
+  const random = seededRandom(seed + 991);
+  const trials = buildPatternTrials(successes, seed, pattern);
   const sequence: Stimulus[] = [];
 
-  outcomes.forEach((success, index) => {
+  trials.forEach((trial, index) => {
     if (index > 0) {
-      sequence.push(randomStimulus(random, [antecedent]));
+      sequence.push(randomStimulus(random, [pattern[0]]));
     }
-    sequence.push(matchingStimulus(antecedent, random));
-    sequence.push(success ? matchingStimulus(consequent, random) : randomStimulus(random, [antecedent, consequent]));
+    sequence.push(...trial);
   });
 
   return sequence;
+}
+
+function describePatternStep(pattern: StimulusPattern) {
+  if (pattern.color && pattern.shape) return `${pattern.color} ${pattern.shape}`;
+  if (pattern.shape) return `${pattern.shape} (any color)`;
+  if (pattern.color) return `${pattern.color} object (any shape)`;
+  return "unspecified object";
+}
+
+function describePattern(pattern: StimulusPattern[]) {
+  return pattern.map(describePatternStep).join(" → ");
 }
 
 function buildCalibrationSequence() {
@@ -164,6 +194,31 @@ function StrokeButton({ children, onClick, disabled = false }: {
   );
 }
 
+function PatternSelect<T extends string>({ label, value, options, onChange }: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="grid min-w-0 flex-1 gap-1.5">
+      <span className="text-[10px] font-semibold text-[#777673]">{label}</span>
+      <span className="relative rounded-[10px] bg-linear-to-b from-[#f3f3f3] via-[#f3f3f3] to-[#eaeaea] p-px focus-within:from-[#ebebeb] focus-within:via-[#e8e8e8] focus-within:to-[#e0e0e0]">
+        <select
+          className="block h-9 w-full cursor-pointer appearance-none rounded-[9px] border-0 bg-white px-3 pr-8 text-xs capitalize text-[#2c2c2b] shadow-sm outline-none focus:bg-[#fdfdfc]"
+          value={value}
+          onChange={(event) => onChange(event.target.value as T)}
+        >
+          {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+        </select>
+        <svg className="pointer-events-none absolute top-1/2 right-3 h-3 w-3 -translate-y-1/2 text-[#8d8c88]" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    </label>
+  );
+}
+
 function ProgressBar({ value, className = "", label = "Progress" }: { value: number; className?: string; label?: string }) {
   const percentage = Math.max(0, Math.min(100, value));
 
@@ -177,7 +232,7 @@ function ProgressBar({ value, className = "", label = "Progress" }: { value: num
       className={`h-1 overflow-hidden rounded-full bg-black/5 ${className}`}
     >
       <div
-        className="h-full rounded-full bg-neutral-800 transition-[width] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0"
+        className="h-full rounded-full bg-neutral-800 transition-[width] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0"
         style={{ width: `${percentage}%` }}
       />
     </div>
@@ -194,8 +249,8 @@ function Shape({ stimulus, mini = false }: { stimulus: Stimulus; mini?: boolean 
 
   return (
     <svg
-      className={mini ? "h-[18px] w-[18px] overflow-visible" : "h-[132px] w-[132px] overflow-visible drop-shadow-[0_8px_14px_rgba(28,27,24,0.09)]"}
-      viewBox="0 0 120 120"
+      className={mini ? "h-4.5 w-4.5 overflow-visible" : "h-48 w-48 overflow-visible drop-shadow-[0_4px_8px_rgba(28,27,24,0.04)]"}
+      viewBox="0 0 140 140"
       role={mini ? undefined : "img"}
       aria-label={mini ? undefined : `${stimulus.color} ${stimulus.shape}`}
       aria-hidden={mini ? true : undefined}
@@ -216,7 +271,7 @@ function Shape({ stimulus, mini = false }: { stimulus: Stimulus; mini?: boolean 
   );
 }
 
-function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[]; label: string; onComplete: () => void }) {
+function SequencePlayer({ sequence, onComplete }: { sequence: Stimulus[]; onComplete: () => void }) {
   const [index, setIndex] = useState<number | null>(null);
   const completeRef = useRef(onComplete);
 
@@ -233,8 +288,7 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
   }, [index, sequence.length]);
 
   const started = index !== null;
-  const complete = started && index >= sequence.length;
-  const playing = started && !complete;
+  const playing = started && index < sequence.length;
   const progress = playing ? (((index ?? 0) + 1) / sequence.length) * 100 : 0;
 
   return (
@@ -249,17 +303,6 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
           />
         </div>
       )}
-      {!playing && (
-        <div className={`mt-[30px] grid min-h-[320px] grid-rows-[auto_1fr] rounded-2xl bg-white/90 p-[22px] sm:min-h-[350px] ${GRAPHITE_CARD}`}>
-          <div className="flex items-center justify-between text-[11px] text-[#a09f9c]">
-            <span>{label}</span>
-            <span>{complete ? "Complete" : "Ready"}</span>
-          </div>
-          <div className="grid min-h-60 place-items-center">
-            <span className="text-xs text-[#aaa8a4]">{complete ? "Sequence complete" : "Press start when you are ready"}</span>
-          </div>
-        </div>
-      )}
       {!started && <div className="mt-8 flex justify-end gap-2.5"><StrokeButton onClick={() => setIndex(0)}>Start sequence</StrokeButton></div>}
     </>
   );
@@ -267,8 +310,8 @@ function SequencePlayer({ sequence, label, onComplete }: { sequence: Stimulus[];
 
 function ConfidenceControl({ value, onChange }: { value: number; onChange: (value: number) => void }) {
   return (
-    <div className="mt-[34px]">
-      <div className="mb-5 text-5xl font-medium text-[#2c2c2b]"><output>{value}</output><span className="ml-[5px] text-[15px] text-[#a09f9c]">/ 100</span></div>
+    <div className="mt-8.5">
+      <div className="mb-5 text-5xl font-medium text-[#2c2c2b]"><output>{value}</output><span className="ml-1.25 text-[15px] text-[#a09f9c]">/ 100</span></div>
       <input
         className="w-full cursor-pointer accent-[#7e668f]"
         type="range"
@@ -311,9 +354,9 @@ function Chart({ ratings }: { ratings: number[] }) {
           </text>
         ))}
       </svg>
-      <div className="mt-1 ml-[26px] flex gap-[18px] text-[10px] text-[#777673]">
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-[18px] bg-[#79628a]" />Your confidence</span>
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-[18px] bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Observed success rate</span>
+      <div className="mt-1 ml-6.5 flex gap-4.5 text-[10px] text-[#777673]">
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[#79628a]" />Your confidence</span>
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Observed success rate</span>
       </div>
     </>
   );
@@ -336,19 +379,28 @@ function progressFor(screen: Screen, round: number) {
 export function ExperimentDemo() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [condition, setCondition] = useState<Condition | null>(null);
-  const [hypothesisText, setHypothesisText] = useState("");
+  const [patternSteps, setPatternSteps] = useState<PatternStep[]>(() => DEFAULT_PATTERN_STEPS.map((step) => ({ ...step })));
   const [round, setRound] = useState(0);
   const [ratings, setRatings] = useState<number[]>([]);
   const [confidence, setConfidence] = useState(70);
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [sequenceComplete, setSequenceComplete] = useState(false);
+  const nextPatternStepId = useRef(3);
   const calibrationSequence = useMemo(() => buildCalibrationSequence(), []);
-  const hypothesis = condition === "provided" ? PROVIDED_HYPOTHESIS : hypothesisText.trim();
+  const machinePattern = useMemo<StimulusPattern[]>(() => patternSteps.map((step) => ({
+    ...(step.color !== "any" ? { color: step.color } : {}),
+    ...(step.shape !== "any" ? { shape: step.shape } : {}),
+  })), [patternSteps]);
+  const patternValid = machinePattern.every((step) => step.color || step.shape);
+  const activePattern = condition === "provided" ? DEFAULT_MACHINE_PATTERN : machinePattern;
+  const checkedPattern = activePattern.every((step) => step.color || step.shape) ? activePattern : DEFAULT_MACHINE_PATTERN;
+  const hypothesis = condition === "provided" ? PROVIDED_HYPOTHESIS : describePattern(machinePattern);
 
   const reset = useCallback(() => {
     setScreen("setup");
     setCondition(null);
-    setHypothesisText("");
+    setPatternSteps(DEFAULT_PATTERN_STEPS.map((step) => ({ ...step })));
+    nextPatternStepId.current = 3;
     setRound(0);
     setRatings([]);
     setConfidence(70);
@@ -358,10 +410,10 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-4-freeform-patterns",
+      version: "prototype-5-structured-patterns",
       condition,
       hypothesis,
-      standardizedEvidenceRule: PROVIDED_HYPOTHESIS,
+      pattern: activePattern,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
       diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
       startedAt,
@@ -374,21 +426,28 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [condition, hypothesis, ratings, startedAt]);
+  }, [activePattern, condition, hypothesis, ratings, startedAt]);
 
-  const diagnosticPairs = useMemo(() => {
-    const sequence = buildSequence(8, 1197);
-    const pairs: [Stimulus, Stimulus][] = [];
-    for (let index = 0; index < sequence.length - 1; index += 1) {
-      if (matchesPattern(sequence[index], DEFAULT_ANTECEDENT)) pairs.push([sequence[index], sequence[index + 1]]);
-    }
-    return pairs.slice(0, 10);
-  }, []);
+  const diagnosticTrials = useMemo(() => buildPatternTrials(8, 1197, checkedPattern), [checkedPattern]);
 
   const evidenceSequence = useMemo(() => {
     if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73);
-  }, [round]);
+    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73, checkedPattern);
+  }, [checkedPattern, round]);
+
+  const updatePatternStep = (id: number, update: Partial<Pick<PatternStep, "color" | "shape">>) => {
+    setPatternSteps((current) => current.map((step) => step.id === id ? { ...step, ...update } : step));
+  };
+
+  const addPatternStep = () => {
+    const id = nextPatternStepId.current;
+    nextPatternStepId.current += 1;
+    setPatternSteps((current) => [...current, { id, color: "any", shape: "circle" }]);
+  };
+
+  const removePatternStep = (id: number) => {
+    setPatternSteps((current) => current.filter((step) => step.id !== id));
+  };
 
   const submitEvidenceRating = () => {
     setRatings((current) => [...current, confidence]);
@@ -398,13 +457,13 @@ export function ExperimentDemo() {
   };
 
   return (
-    <main className="grid min-h-screen grid-rows-[auto_1fr] px-4 pt-[18px] pb-[34px] sm:px-6 sm:pt-7 sm:pb-12">
-      <header className="mx-auto grid min-h-9 w-full max-w-[920px] grid-cols-[1fr_auto] items-center">
+    <main className="grid min-h-screen grid-rows-[auto_1fr] px-4 pt-4.5 pb-8.5 sm:px-6 sm:pt-7 sm:pb-12">
+      <header className="mx-auto grid min-h-9 w-full max-w-230 grid-cols-[1fr_auto] items-center">
         <div className="text-xs font-semibold text-[#4f4e4b]">EM2</div>
         {screen !== "setup" ? <button className="cursor-pointer border-0 bg-transparent py-2 text-[11px] text-[#a09f9c] hover:text-[#2c2c2b]" onClick={reset}>Exit demo</button> : <span />}
       </header>
 
-      <section className={`m-auto w-full py-10 sm:py-[54px] ${["calibration", "hypothesis", "review", "evidence", "results"].includes(screen) ? "max-w-[720px]" : "max-w-[560px]"}`} key={`${screen}-${round}`}>
+      <section className={`m-auto w-full py-10 sm:py-13.5 ${["calibration", "hypothesis", "review", "evidence", "results"].includes(screen) ? "max-w-180" : "max-w-140"}`} key={`${screen}-${round}`}>
         {screen === "setup" && (
           <>
             <p className={EYEBROW}>Interactive prototype</p>
@@ -416,18 +475,18 @@ export function ExperimentDemo() {
                 ["provided", "receive", "Provided", "Evaluate a matched pattern."],
               ] as const).map(([value, iconName, title, description]) => (
                 <button
-                  className={`flex min-h-[92px] w-full cursor-pointer items-center gap-4 rounded-md bg-white px-[22px] py-5 text-left transition duration-150 motion-reduce:transition-none ${GRAPHITE_CARD} ${condition === value ? "border-black/[0.16] bg-[#f9f9f7]" : "hover:-translate-y-0.5 hover:border-black/[0.15]"}`}
+                  className={`flex min-h-23 w-full cursor-pointer items-center gap-4 rounded-md bg-white px-5.5 py-5 text-left transition duration-150 motion-reduce:transition-none ${GRAPHITE_CARD} ${condition === value ? "border-black/16 bg-[#f9f9f7]" : "hover:-translate-y-0.5 hover:border-black/15"}`}
                   onClick={() => setCondition(value)}
                   aria-pressed={condition === value}
                   type="button"
                   key={value}
                 >
-                  <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-[11px] ${condition === value ? "bg-[#e5e0e9] text-[#715d82]" : "bg-black/[0.035] text-[#676561]"}`}><span className="h-[22px] w-[22px]"><Icon name={iconName} /></span></span>
-                  <span className="grid gap-[5px]"><span className="text-sm font-semibold text-[#37352f]">{title}</span><span className="text-xs leading-[1.45] text-[#777673]">{description}</span></span>
+                  <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-[11px] ${condition === value ? "bg-[#e5e0e9] text-[#715d82]" : "bg-black/[0.035] text-[#676561]"}`}><span className="h-5.5 w-5.5"><Icon name={iconName} /></span></span>
+                  <span className="grid gap-1.25"><span className="text-sm font-semibold text-[#37352f]">{title}</span><span className="text-xs leading-[1.45] text-[#777673]">{description}</span></span>
                 </button>
               ))}
             </div>
-            <div className="mt-[26px] rounded-lg border border-[#715d82]/[0.12] bg-[#f5f2f7] px-4 py-3.5 text-xs leading-[1.55] text-[#675a70]">Condition assignment is visible in demo mode.</div>
+            <div className="mt-6.5 rounded-lg border border-[#715d82]/12 bg-[#f5f2f7] px-4 py-3.5 text-xs leading-[1.55] text-[#675a70]">Condition assignment is visible in demo mode.</div>
             <div className={ACTIONS}><StrokeButton disabled={!condition} onClick={() => setScreen("intro")}>Begin</StrokeButton></div>
           </>
         )}
@@ -447,7 +506,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Calibration sequence</p>
             <h1 className={HEADING}>Watch closely</h1>
             <p className={LEDE}>Each object stays visible long enough to inspect both features. The sequence takes about a minute.</p>
-            <SequencePlayer sequence={calibrationSequence} label="Observation 1" onComplete={() => setSequenceComplete(true)} />
+            <SequencePlayer sequence={calibrationSequence} onComplete={() => setSequenceComplete(true)} />
             {sequenceComplete && <div className={`${ACTIONS} mt-3.5`}><StrokeButton onClick={() => { setSequenceComplete(false); setScreen("hypothesis"); }}>Continue</StrokeButton></div>}
           </>
         )}
@@ -457,7 +516,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>A possible regularity</p>
             <h1 className={HEADING}>Consider this pattern</h1>
             <p className={LEDE}>Proposed by the matched participant.</p>
-            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Provided hypothesis</span><p className="mt-3 whitespace-pre-wrap break-words text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
+            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Provided hypothesis</span><p className="mt-3 whitespace-pre-wrap wrap-break-word text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
             <div className={ACTIONS}><StrokeButton onClick={() => setScreen("review")}>Continue</StrokeButton></div>
           </>
         )}
@@ -465,28 +524,34 @@ export function ExperimentDemo() {
         {screen === "hypothesis" && condition === "generated" && (
           <>
             <p className={EYEBROW}>Your observation</p>
-            <h1 className={HEADING}>What did you notice?</h1>
-            <p className={LEDE}>Describe the pattern in your own words.</p>
+            <h1 className={HEADING}>Build the pattern</h1>
+            <p className={LEDE}>Add each object in order. Use color, shape, or both.</p>
             <div className={FORM_CARD}>
-              <label className={FIELD_LABEL} htmlFor="hypothesis">Your hypothesis</label>
-              <div className="rounded-[10px] bg-linear-to-b from-[#f3f3f3] via-[#f3f3f3] to-[#eaeaea] p-px transition-colors duration-150 focus-within:from-[#ebebeb] focus-within:via-[#e8e8e8] focus-within:to-[#e0e0e0] motion-reduce:transition-none">
-                <textarea
-                  id="hypothesis"
-                  className="block min-h-[138px] w-full resize-y overflow-hidden rounded-[9px] border-0 bg-white px-[15px] py-3.5 text-sm leading-[1.65] text-[#2c2c2b] shadow-[0_1px_2px_rgba(0,0,0,0.05)] outline-none placeholder:text-[#a09f9c] focus:bg-[#fdfdfc]"
-                  value={hypothesisText}
-                  rows={5}
-                  placeholder="For example: A circle is usually followed by a triangle, no matter what color either shape is."
-                  aria-describedby="hypothesis-help"
-                  onChange={(event) => setHypothesisText(event.target.value)}
-                  onInput={(event) => {
-                    event.currentTarget.style.height = "auto";
-                    event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
-                  }}
-                />
+              <div className="grid gap-3">
+                {patternSteps.map((step, index) => {
+                  const empty = step.color === "any" && step.shape === "any";
+                  return (
+                    <div className={`rounded-xl border p-3.5 ${empty ? "border-[#b9786d]/35 bg-[#fffafa]" : "border-black/8 bg-[#fafaf9]"}`} key={step.id}>
+                      <div className="mb-2.5 flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-[#715d82]">Step {index + 1}</span>
+                        {patternSteps.length > 2 && <button className="cursor-pointer border-0 bg-transparent px-1 py-0.5 text-[10px] text-[#a09f9c] hover:text-[#5e5d59]" type="button" onClick={() => removePatternStep(step.id)}>Remove</button>}
+                      </div>
+                      <div className="flex gap-2.5">
+                        <PatternSelect label="Color" value={step.color} options={COLOR_OPTIONS} onChange={(color) => updatePatternStep(step.id, { color })} />
+                        <PatternSelect label="Shape" value={step.shape} options={SHAPE_OPTIONS} onChange={(shape) => updatePatternStep(step.id, { shape })} />
+                      </div>
+                      {empty && <p className="mt-2 text-[10px] text-[#a05f54]">Choose a color or shape for this step.</p>}
+                    </div>
+                  );
+                })}
               </div>
-              <p className="mx-0.5 mt-[9px] text-[11px] leading-[1.45] text-[#a09f9c]" id="hypothesis-help">Use as much detail as you need. Color is optional.</p>
+              <div className="mt-3.5"><StrokeButton onClick={addPatternStep}>Add another step</StrokeButton></div>
+              <div className="mt-5 rounded-lg bg-[#f5f2f7] px-4 py-3.5">
+                <span className="text-[10px] font-semibold text-[#715d82]">Machine-readable pattern</span>
+                <p className="mt-2 wrap-break-word text-sm leading-[1.55] text-[#403a44]">{hypothesis}</p>
+              </div>
             </div>
-            <div className={ACTIONS}><StrokeButton disabled={!hypothesisText.trim()} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton disabled={!patternValid} onClick={() => setScreen("review")}>Save pattern</StrokeButton></div>
           </>
         )}
 
@@ -495,13 +560,23 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Standardized review</p>
             <h1 className={HEADING}>Check the pattern</h1>
             <p className={LEDE}>The matched pair receives the same review.</p>
-            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Current hypothesis</span><p className="mt-3 whitespace-pre-wrap break-words text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
-            <div className="mt-6 grid grid-cols-2 gap-[9px] sm:grid-cols-5">
-              {diagnosticPairs.map(([first, second], index) => (
-                <div className={`flex min-w-0 items-center justify-center gap-[5px] rounded-lg border p-[11px_6px] ${matchesPattern(second, DEFAULT_CONSEQUENT) ? "border-[#715d82]/20 bg-[#f5f2f7]" : "border-black/10 bg-white"}`} key={index}>
-                  <Shape stimulus={first} mini /><span className="text-[10px] text-[#aaa8a4]">→</span><Shape stimulus={second} mini />
-                </div>
-              ))}
+            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Current hypothesis</span><p className="mt-3 whitespace-pre-wrap wrap-break-word text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
+            <div className="mt-6 grid gap-2.25 sm:grid-cols-2">
+              {diagnosticTrials.map((trial, index) => {
+                const success = trial.every((stimulus, stepIndex) => matchesPattern(stimulus, checkedPattern[stepIndex]));
+                return (
+                  <div className={`min-w-0 overflow-x-auto rounded-lg border px-3 py-2.75 ${success ? "border-[#715d82]/20 bg-[#f5f2f7]" : "border-black/10 bg-white"}`} key={index}>
+                    <div className="flex w-max min-w-full items-center justify-center gap-1.25">
+                      {trial.map((stimulus, stepIndex) => (
+                        <span className="contents" key={`${index}-${stepIndex}`}>
+                          {stepIndex > 0 && <span className="text-[10px] text-[#aaa8a4]">→</span>}
+                          <Shape stimulus={stimulus} mini />
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div className={ACTIONS}><StrokeButton onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
           </>
@@ -512,7 +587,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Confidence rating</p>
             <h1 className={HEADING}>How confident are you?</h1>
             <p className={LEDE}>Does this pattern describe the sequence?</p>
-            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Your hypothesis</span><p className="mt-3 whitespace-pre-wrap break-words text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
+            <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Your hypothesis</span><p className="mt-3 whitespace-pre-wrap wrap-break-word text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
             <ConfidenceControl value={confidence} onChange={setConfidence} />
             <div className={ACTIONS}><StrokeButton onClick={() => { setRatings([confidence]); setRound(0); setSequenceComplete(false); setScreen("evidence"); }}>Submit rating</StrokeButton></div>
           </>
@@ -520,10 +595,10 @@ export function ExperimentDemo() {
 
         {screen === "evidence" && (
           <>
-            <span className="mb-3.5 inline-flex rounded-full bg-[#e5e0e9] px-[9px] py-1.5 text-[10px] font-semibold text-[#715d82]">Evidence block {round + 1} of {EVIDENCE_RATES.length}</span>
+            <span className="mb-3.5 inline-flex rounded-full bg-[#e5e0e9] px-2.25 py-1.5 text-[10px] font-semibold text-[#715d82]">Evidence block {round + 1} of {EVIDENCE_RATES.length}</span>
             <h1 className={HEADING}>Watch again</h1>
             <p className={LEDE}>Keep your pattern in mind.</p>
-            <SequencePlayer sequence={evidenceSequence} label={`New evidence ${round + 1}`} onComplete={() => { setConfidence(ratings.at(-1) ?? 70); setSequenceComplete(true); }} />
+            <SequencePlayer sequence={evidenceSequence} onComplete={() => { setConfidence(ratings.at(-1) ?? 70); setSequenceComplete(true); }} />
             {sequenceComplete && (
               <>
                 <div className={FORM_CARD}><label className={FIELD_LABEL}>Update your confidence</label><ConfidenceControl value={confidence} onChange={setConfidence} /></div>
@@ -538,7 +613,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Demo complete</p>
             <h1 className={HEADING}>Your confidence over time</h1>
             <p className={LEDE}>Prototype summary.</p>
-            <div className={`mt-[30px] rounded-[13px] bg-white px-5 pt-6 pb-[18px] ${GRAPHITE_CARD}`}><Chart ratings={ratings} /></div>
+            <div className={`mt-7.5 rounded-[13px] bg-white px-5 pt-6 pb-4.5 ${GRAPHITE_CARD}`}><Chart ratings={ratings} /></div>
             <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings[0]}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Initial confidence</div></div>
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings.at(-1)}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Final confidence</div></div>
