@@ -21,6 +21,11 @@ type Screen = "setup" | "intro" | "calibration" | "hypothesis" | "review" | "con
 type Stimulus = { color: ColorName; shape: ShapeName };
 type StimulusPattern = { color?: ColorName; shape?: ShapeName };
 type PatternStep = { id: number; color: ColorName | "any"; shape: ShapeName | "any" };
+type CalibrationPattern = {
+  antecedent: StimulusPattern;
+  consequent: StimulusPattern;
+  successes: number;
+};
 type IconName = "pencil" | "receive";
 
 const COLOR_OPTIONS: Array<{ value: ColorName | "any"; label: string }> = [
@@ -37,7 +42,6 @@ const DEFAULT_PATTERN_STEPS: PatternStep[] = [
   { id: 1, color: "any", shape: "circle" },
   { id: 2, color: "any", shape: "triangle" },
 ];
-const PROVIDED_HYPOTHESIS = "Circle (any color) → triangle (any color)";
 const MINI_SOFT_SHADOW = "shadow-[0_5px_10px_rgba(0,0,0,0.03),0_0.25px_0.5px_rgba(0,0,0,0.05),0_1px_1.5px_rgba(0,0,0,0.04),0_2.5px_5px_rgba(0,0,0,0.04),0_0.5px_1px_rgba(0,0,0,0.02)]";
 const GRAPHITE_CARD = `border-[0.5px] border-black/[0.08] ${MINI_SOFT_SHADOW}`;
 const HEADING = "m-0 text-[clamp(26px,4vw,34px)] font-semibold leading-[1.18] text-[#2c2c2b]";
@@ -47,16 +51,6 @@ const ACTIONS = "mt-8 flex justify-end gap-2.5";
 const BELIEF_CARD = `mt-7.5 rounded-[13px] bg-linear-to-br from-white to-[#faf8fb] p-7 ${GRAPHITE_CARD}`;
 const FORM_CARD = `mt-8 rounded-xl bg-white p-6 ${GRAPHITE_CARD}`;
 const FIELD_LABEL = "mb-2.25 block text-[11px] font-semibold text-[#777673]";
-const CALIBRATION_PATTERNS: Array<{
-  antecedent: StimulusPattern;
-  consequent: StimulusPattern;
-  successes: number;
-}> = [
-  { antecedent: DEFAULT_MACHINE_PATTERN[0], consequent: DEFAULT_MACHINE_PATTERN[1], successes: 6 },
-  { antecedent: { color: "red" }, consequent: { color: "blue" }, successes: 6 },
-  { antecedent: { color: "green", shape: "pentagon" }, consequent: { color: "yellow", shape: "square" }, successes: 5 },
-];
-
 function seededRandom(seed: number) {
   let value = seed >>> 0;
   return () => {
@@ -75,6 +69,24 @@ function shuffled<T>(values: T[], random: () => number) {
     [copy[index], copy[swap]] = [copy[swap], copy[index]];
   }
   return copy;
+}
+
+function generateCalibrationPatterns(seed: number): CalibrationPattern[] {
+  const random = seededRandom(seed);
+  const shapePair = shuffled([...SHAPES], random).slice(0, 2);
+  const colorPair = shuffled([...COLOR_NAMES], random).slice(0, 2);
+  const complexShapes = shuffled([...SHAPES], random).slice(0, 2);
+  const complexColors = shuffled([...COLOR_NAMES], random).slice(0, 2);
+
+  return shuffled([
+    { antecedent: { shape: shapePair[0] }, consequent: { shape: shapePair[1] }, successes: 6 },
+    { antecedent: { color: colorPair[0] }, consequent: { color: colorPair[1] }, successes: 6 },
+    {
+      antecedent: { color: complexColors[0], shape: complexShapes[0] },
+      consequent: { color: complexColors[1], shape: complexShapes[1] },
+      successes: 5,
+    },
+  ], random);
 }
 
 function makeStimulus(color: ColorName, random: () => number): Stimulus {
@@ -138,16 +150,16 @@ function describePattern(pattern: StimulusPattern[]) {
   return pattern.map(describePatternStep).join(" → ");
 }
 
-function buildCalibrationSequence() {
-  const random = seededRandom(1197);
-  const trials = CALIBRATION_PATTERNS.flatMap((pattern) =>
+function buildCalibrationSequence(patterns: CalibrationPattern[], seed: number) {
+  const random = seededRandom(seed + 417);
+  const trials = patterns.flatMap((pattern) =>
     shuffled(
       Array.from({ length: 6 }, (_, index) => ({ pattern, success: index < pattern.successes })),
       random,
     ),
   );
   const sequence: Stimulus[] = [];
-  const antecedents = CALIBRATION_PATTERNS.map((pattern) => pattern.antecedent);
+  const antecedents = patterns.map((pattern) => pattern.antecedent);
 
   shuffled(trials, random).forEach(({ pattern, success }, index) => {
     if (index > 0) sequence.push(randomStimulus(random, antecedents));
@@ -385,16 +397,25 @@ export function ExperimentDemo() {
   const [confidence, setConfidence] = useState(70);
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString());
   const [sequenceComplete, setSequenceComplete] = useState(false);
+  const [runSeed, setRunSeed] = useState(1197);
   const nextPatternStepId = useRef(3);
-  const calibrationSequence = useMemo(() => buildCalibrationSequence(), []);
+  const calibrationPatterns = useMemo(() => generateCalibrationPatterns(runSeed), [runSeed]);
+  const calibrationSequence = useMemo(() => buildCalibrationSequence(calibrationPatterns, runSeed), [calibrationPatterns, runSeed]);
+  const providedPattern = useMemo(() => [calibrationPatterns[0].antecedent, calibrationPatterns[0].consequent], [calibrationPatterns]);
   const machinePattern = useMemo<StimulusPattern[]>(() => patternSteps.map((step) => ({
     ...(step.color !== "any" ? { color: step.color } : {}),
     ...(step.shape !== "any" ? { shape: step.shape } : {}),
   })), [patternSteps]);
   const patternValid = machinePattern.every((step) => step.color || step.shape);
-  const activePattern = condition === "provided" ? DEFAULT_MACHINE_PATTERN : machinePattern;
+  const activePattern = condition === "provided" ? providedPattern : machinePattern;
   const checkedPattern = activePattern.every((step) => step.color || step.shape) ? activePattern : DEFAULT_MACHINE_PATTERN;
-  const hypothesis = condition === "provided" ? PROVIDED_HYPOTHESIS : describePattern(machinePattern);
+  const hypothesis = condition === "provided" ? describePattern(providedPattern) : describePattern(machinePattern);
+
+  const startExperiment = () => {
+    setRunSeed(Math.floor(Math.random() * 4_294_967_295));
+    setStartedAt(new Date().toISOString());
+    setScreen("intro");
+  };
 
   const reset = useCallback(() => {
     setScreen("setup");
@@ -410,10 +431,12 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-5-structured-patterns",
+      version: "prototype-6-randomized-patterns",
       condition,
       hypothesis,
       pattern: activePattern,
+      calibrationPatterns,
+      runSeed,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
       diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
       startedAt,
@@ -426,14 +449,14 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [activePattern, condition, hypothesis, ratings, startedAt]);
+  }, [activePattern, calibrationPatterns, condition, hypothesis, ratings, runSeed, startedAt]);
 
-  const diagnosticTrials = useMemo(() => buildPatternTrials(8, 1197, checkedPattern), [checkedPattern]);
+  const diagnosticTrials = useMemo(() => buildPatternTrials(8, runSeed + 1_197, checkedPattern), [checkedPattern, runSeed]);
 
   const evidenceSequence = useMemo(() => {
     if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, 2400 + round * 73, checkedPattern);
-  }, [checkedPattern, round]);
+    return buildSequence(EVIDENCE_RATES[round] / 10, runSeed + 2_400 + round * 73, checkedPattern);
+  }, [checkedPattern, round, runSeed]);
 
   const updatePatternStep = (id: number, update: Partial<Pick<PatternStep, "color" | "shape">>) => {
     setPatternSteps((current) => current.map((step) => step.id === id ? { ...step, ...update } : step));
@@ -487,7 +510,7 @@ export function ExperimentDemo() {
               ))}
             </div>
             <div className="mt-6.5 rounded-lg border border-[#715d82]/12 bg-[#f5f2f7] px-4 py-3.5 text-xs leading-[1.55] text-[#675a70]">Condition assignment is visible in demo mode.</div>
-            <div className={ACTIONS}><StrokeButton disabled={!condition} onClick={() => setScreen("intro")}>Begin</StrokeButton></div>
+            <div className={ACTIONS}><StrokeButton disabled={!condition} onClick={startExperiment}>Begin</StrokeButton></div>
           </>
         )}
 
