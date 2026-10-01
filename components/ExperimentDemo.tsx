@@ -552,7 +552,10 @@ function ConfidenceControl({ value, onChange }: { value: number; onChange: (valu
         onChange={(event) => onChange(Number(event.target.value))}
         aria-label="Confidence from 0 to 100"
       />
-      <div className="mt-2.5 flex justify-between text-[10px] text-[#a09f9c]"><span>Certain it does not</span><span>Unsure</span><span>Certain it does</span></div>
+      <div className="mt-2.5 flex justify-between text-[12px] text-[#2c2c2b]/80">
+        <span>Not at all confident</span>
+        <span>Very confident</span>
+      </div>
     </div>
   );
 }
