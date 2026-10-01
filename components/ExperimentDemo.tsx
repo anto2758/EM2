@@ -305,13 +305,9 @@ function describePattern(pattern: StimulusPattern[]) {
 function findPatternWindows(sequence: Stimulus[], pattern: StimulusPattern[]) {
   if (pattern.length < 2) return [];
   const windows: Stimulus[][] = [];
-  const antecedent = pattern.slice(0, -1);
 
   for (let index = 0; index <= sequence.length - pattern.length; index += 1) {
-    const antecedentMatches = antecedent.every(
-      (step, offset) => matchesPattern(sequence[index + offset], step),
-    );
-    if (antecedentMatches) {
+    if (matchesPattern(sequence[index], pattern[0])) {
       windows.push(sequence.slice(index, index + pattern.length));
     }
   }
@@ -866,7 +862,7 @@ export function ExperimentDemo() {
                   </div>
                 );
               })}
-            </div> : <div className="mt-6 rounded-lg border border-black/10 bg-white px-4 py-5 text-xs text-[#777673]">The preceding steps of this pattern did not occur together in the calibration sequence.</div>}
+            </div> : <div className="mt-6 rounded-lg border border-black/10 bg-white px-4 py-5 text-xs text-[#777673]">The first step of this pattern did not occur in the calibration sequence.</div>}
             <div className={ACTIONS}><StrokeButton onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
           </>
         )}
