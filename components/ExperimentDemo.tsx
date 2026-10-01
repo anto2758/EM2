@@ -17,6 +17,13 @@ const STIMULUS_INTERVAL_MS = 1400;
 const MARKOV_ORDER = 3;
 const CALIBRATION_SEQUENCE_LENGTH = 60;
 const EVIDENCE_SEQUENCE_LENGTH = 40;
+const RECURRING_PATTERN_COUNT = 12;
+const MIN_RECURRING_PATTERNS_PER_BLOCK = 3;
+const MIN_STATE_EXPOSURE_RATIO = 0.7;
+const MAX_STATE_EXPOSURE_RATIO = 1.3;
+const MAX_SHORT_MOTIF_LENGTH = 3;
+const DISALLOWED_MOTIF_REPETITIONS = 3;
+const MAX_SEQUENCE_GENERATION_ATTEMPTS = 500;
 // Change this value from 0 to 100 to configure the preferred calibration transition weight.
 const CALIBRATION_PREFERRED_TRANSITION_PERCENTAGE = 95;
 
@@ -30,6 +37,8 @@ type PatternStep = { id: number; color: ColorName | "any"; shape: ShapeName | "a
 type MarkovModel = {
   states: Stimulus[];
   preferredNextByContext: number[];
+  recurringCycleStateIndices: number[];
+  recurringContextIndices: number[];
 };
 type IconName = "pencil" | "receive";
 
@@ -76,19 +85,90 @@ function shuffled<T>(values: T[], random: () => number) {
   return copy;
 }
 
+function cycleItem<T>(cycle: T[], index: number) {
+  return cycle[((index % cycle.length) + cycle.length) % cycle.length];
+}
+
+function contextIndex(stateIndices: number[], stateCount: number) {
+  return stateIndices.reduce((value, stateIndex) => value * stateCount + stateIndex, 0);
+}
+
+function decodeContextIndex(index: number, stateCount: number) {
+  return Array.from({ length: MARKOV_ORDER }, (_, offset) => (
+    Math.floor(index / stateCount ** (MARKOV_ORDER - offset - 1)) % stateCount
+  ));
+}
+
+function hasUniqueCyclicContexts(cycle: number[], stateCount: number) {
+  const contexts = new Set<number>();
+  for (let index = 0; index < cycle.length; index += 1) {
+    contexts.add(contextIndex(
+      Array.from({ length: MARKOV_ORDER }, (_, offset) => cycleItem(cycle, index + offset)),
+      stateCount,
+    ));
+  }
+  return contexts.size === cycle.length;
+}
+
+function generateRecurringCycle(stateCount: number, random: () => number) {
+  const appearancesPerState = RECURRING_PATTERN_COUNT / stateCount;
+  const balancedStates = Array.from(
+    { length: RECURRING_PATTERN_COUNT },
+    (_, index) => Math.floor(index / appearancesPerState),
+  );
+
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
+    const candidate = shuffled(balancedStates, random);
+    const hasAdjacentDuplicate = candidate.some(
+      (stateIndex, index) => stateIndex === cycleItem(candidate, index + 1),
+    );
+    if (!hasAdjacentDuplicate && hasUniqueCyclicContexts(candidate, stateCount)) return candidate;
+  }
+
+  throw new Error("Could not generate a balanced recurring Markov structure.");
+}
+
 function generateMarkovModel(seed: number): MarkovModel {
   const random = seededRandom(seed);
   const shapes = shuffled([...SHAPES], random);
   const colors = shuffled([...COLOR_NAMES], random);
   const states = shapes.map((shape, index) => ({ shape, color: colors[index] }));
   const contextCount = states.length ** MARKOV_ORDER;
+  const recurringCycleStateIndices = generateRecurringCycle(states.length, random);
+  const recurringContextIndices = recurringCycleStateIndices.map((_, index) => contextIndex(
+    Array.from(
+      { length: MARKOV_ORDER },
+      (__, offset) => cycleItem(recurringCycleStateIndices, index + offset),
+    ),
+    states.length,
+  ));
+  const preferredNextByContext = Array.from({ length: contextCount }, () => -1);
+
+  recurringContextIndices.forEach((recurringContextIndex, index) => {
+    preferredNextByContext[recurringContextIndex] = cycleItem(
+      recurringCycleStateIndices,
+      index + MARKOV_ORDER,
+    );
+  });
+
+  // Work backwards through the context graph so every non-recurring context
+  // returns to the recurring cycle without creating another attractor.
+  const contextsToVisit = [...recurringContextIndices];
+  for (let queueIndex = 0; queueIndex < contextsToVisit.length; queueIndex += 1) {
+    const [first, second, third] = decodeContextIndex(contextsToVisit[queueIndex], states.length);
+    for (let predecessorState = 0; predecessorState < states.length; predecessorState += 1) {
+      const predecessorContext = contextIndex([predecessorState, first, second], states.length);
+      if (preferredNextByContext[predecessorContext] >= 0) continue;
+      preferredNextByContext[predecessorContext] = third;
+      contextsToVisit.push(predecessorContext);
+    }
+  }
 
   return {
     states,
-    preferredNextByContext: Array.from(
-      { length: contextCount },
-      () => Math.floor(random() * states.length),
-    ),
+    preferredNextByContext,
+    recurringCycleStateIndices,
+    recurringContextIndices,
   };
 }
 
@@ -100,10 +180,6 @@ function stimulusStateIndex(stimulus: Stimulus, model: MarkovModel) {
   return model.states.findIndex((state) => state.color === stimulus.color && state.shape === stimulus.shape);
 }
 
-function contextIndex(stateIndices: number[], stateCount: number) {
-  return stateIndices.reduce((value, stateIndex) => value * stateCount + stateIndex, 0);
-}
-
 function sequenceContextIndex(sequence: Stimulus[], start: number, model: MarkovModel) {
   const indices = sequence
     .slice(start, start + MARKOV_ORDER)
@@ -113,7 +189,7 @@ function sequenceContextIndex(sequence: Stimulus[], start: number, model: Markov
   return contextIndex(indices, model.states.length);
 }
 
-function generateMarkovSequence(
+function generateMarkovSequenceCandidate(
   model: MarkovModel,
   length: number,
   seed: number,
@@ -121,7 +197,11 @@ function generateMarkovSequence(
 ) {
   const random = seededRandom(seed);
   const preferredWeight = Math.max(0, Math.min(100, preferredTransitionPercentage)) / 100;
-  const sequence = shuffled(model.states, random).slice(0, Math.min(MARKOV_ORDER, length));
+  const cycleStart = Math.floor(random() * model.recurringCycleStateIndices.length);
+  const sequence = Array.from(
+    { length: Math.min(MARKOV_ORDER, length) },
+    (_, offset) => model.states[cycleItem(model.recurringCycleStateIndices, cycleStart + offset)],
+  );
 
   while (sequence.length < length) {
     const currentContextIndex = sequenceContextIndex(sequence, sequence.length - MARKOV_ORDER, model);
@@ -145,6 +225,70 @@ function generateMarkovSequence(
   }
 
   return sequence;
+}
+
+function hasRepeatedShortMotif(sequence: Stimulus[], model: MarkovModel) {
+  const stateIndices = sequence.map((stimulus) => stimulusStateIndex(stimulus, model));
+
+  for (let motifLength = 1; motifLength <= MAX_SHORT_MOTIF_LENGTH; motifLength += 1) {
+    const repeatedLength = motifLength * DISALLOWED_MOTIF_REPETITIONS;
+    for (let start = 0; start <= stateIndices.length - repeatedLength; start += 1) {
+      const repeatsThreeTimes = Array.from({ length: repeatedLength - motifLength }, (_, offset) => (
+        stateIndices[start + motifLength + offset] === stateIndices[start + offset]
+      )).every(Boolean);
+      if (repeatsThreeTimes) return true;
+    }
+  }
+
+  return false;
+}
+
+function hasBalancedStateExposure(sequence: Stimulus[], model: MarkovModel) {
+  const expectedAppearances = sequence.length / model.states.length;
+  const minimumAppearances = Math.floor(expectedAppearances * MIN_STATE_EXPOSURE_RATIO);
+  const maximumAppearances = Math.ceil(expectedAppearances * MAX_STATE_EXPOSURE_RATIO);
+  const counts = Array.from({ length: model.states.length }, () => 0);
+
+  sequence.forEach((stimulus) => {
+    const stateIndex = stimulusStateIndex(stimulus, model);
+    if (stateIndex >= 0) counts[stateIndex] += 1;
+  });
+
+  return counts.every((count) => count >= minimumAppearances && count <= maximumAppearances);
+}
+
+function observedRecurringPatternCount(sequence: Stimulus[], model: MarkovModel) {
+  const recurringContexts = new Set(model.recurringContextIndices);
+  const observedContexts = new Set<number>();
+
+  for (let index = 0; index <= sequence.length - MARKOV_ORDER - 1; index += 1) {
+    const observedContextIndex = sequenceContextIndex(sequence, index, model);
+    if (recurringContexts.has(observedContextIndex)) observedContexts.add(observedContextIndex);
+  }
+
+  return observedContexts.size;
+}
+
+function generateMarkovSequence(
+  model: MarkovModel,
+  length: number,
+  seed: number,
+  preferredTransitionPercentage: number,
+) {
+  for (let attempt = 0; attempt < MAX_SEQUENCE_GENERATION_ATTEMPTS; attempt += 1) {
+    const sequence = generateMarkovSequenceCandidate(
+      model,
+      length,
+      seed + Math.imul(attempt, 0x9e3779b1),
+      preferredTransitionPercentage,
+    );
+    const isUsable = hasBalancedStateExposure(sequence, model)
+      && !hasRepeatedShortMotif(sequence, model)
+      && observedRecurringPatternCount(sequence, model) >= MIN_RECURRING_PATTERNS_PER_BLOCK;
+    if (isUsable) return sequence;
+  }
+
+  throw new Error("Could not generate a balanced Markov sequence.");
 }
 
 function describePatternStep(pattern: StimulusPattern) {
@@ -532,7 +676,7 @@ export function ExperimentDemo() {
       window.every((stimulus, index) => matchesPattern(stimulus, checkedPattern[index]))
     )).length;
     const payload = {
-      version: "prototype-10-third-order-markov",
+      version: "prototype-11-balanced-third-order-markov",
       condition,
       hypothesis,
       pattern: activePattern,
@@ -546,6 +690,15 @@ export function ExperimentDemo() {
         ...EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES,
       ],
       observedPreferredTransitionPercentages,
+      generationConstraints: {
+        recurringPatternCount: RECURRING_PATTERN_COUNT,
+        minimumRecurringPatternsPerBlock: MIN_RECURRING_PATTERNS_PER_BLOCK,
+        stateExposureRatio: [MIN_STATE_EXPOSURE_RATIO, MAX_STATE_EXPOSURE_RATIO],
+        rejectedMotifs: {
+          maximumLength: MAX_SHORT_MOTIF_LENGTH,
+          repetitions: DISALLOWED_MOTIF_REPETITIONS,
+        },
+      },
       calibrationPatternReview: {
         opportunities: calibrationPatternWindows.length,
         holds: calibrationPatternHolds,
