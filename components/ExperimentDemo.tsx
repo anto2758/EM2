@@ -32,6 +32,8 @@ type CalibrationPattern = {
 };
 type IconName = "pencil" | "receive";
 
+const ALL_STIMULI: Stimulus[] = COLOR_NAMES.flatMap((color) => SHAPES.map((shape) => ({ color, shape })));
+
 const COLOR_OPTIONS: Array<{ value: ColorName | "any"; label: string }> = [
   { value: "any", label: "Any color" },
   ...COLOR_NAMES.map((color) => ({ value: color, label: color })),
@@ -79,8 +81,8 @@ function generateCalibrationPatterns(seed: number): CalibrationPattern[] {
   const random = seededRandom(seed);
   const shapePair = shuffled([...SHAPES], random).slice(0, 2);
   const colorPair = shuffled([...COLOR_NAMES], random).slice(0, 2);
-  const complexShapes = shuffled([...SHAPES], random).slice(0, 2);
-  const complexColors = shuffled([...COLOR_NAMES], random).slice(0, 2);
+  const complexShapes = shuffled(SHAPES.filter((shape) => shape !== shapePair[0]), random).slice(0, 2);
+  const complexColors = shuffled(COLOR_NAMES.filter((color) => color !== colorPair[0]), random).slice(0, 2);
   const totalTrials = CALIBRATION_TRIALS_PER_PATTERN * 3;
   const configuredPercentage = Math.max(0, Math.min(100, CALIBRATION_PATTERN_HOLD_PERCENTAGE));
   const totalSuccesses = Math.round(totalTrials * configuredPercentage / 100);
@@ -103,27 +105,23 @@ function generateCalibrationPatterns(seed: number): CalibrationPattern[] {
   return shuffled(patterns.map((pattern, index) => ({ ...pattern, successes: successCounts[index] })), random);
 }
 
-function makeStimulus(color: ColorName, random: () => number): Stimulus {
-  return { color, shape: SHAPES[Math.floor(random() * SHAPES.length)] };
-}
-
 function matchesPattern(stimulus: Stimulus, pattern: StimulusPattern) {
   return (!pattern.color || stimulus.color === pattern.color) && (!pattern.shape || stimulus.shape === pattern.shape);
 }
 
 function randomStimulus(random: () => number, excluded: StimulusPattern[] = []): Stimulus {
-  let candidate: Stimulus;
-  do {
-    candidate = makeStimulus(COLOR_NAMES[Math.floor(random() * COLOR_NAMES.length)], random);
-  } while (excluded.some((pattern) => matchesPattern(candidate, pattern)));
-  return candidate;
+  const candidates = ALL_STIMULI.filter((stimulus) => !excluded.some((pattern) => matchesPattern(stimulus, pattern)));
+  if (candidates.length === 0) throw new Error("No stimulus satisfies the requested exclusions.");
+  return candidates[Math.floor(random() * candidates.length)];
 }
 
-function matchingStimulus(pattern: StimulusPattern, random: () => number): Stimulus {
-  return {
-    color: pattern.color ?? COLOR_NAMES[Math.floor(random() * COLOR_NAMES.length)],
-    shape: pattern.shape ?? SHAPES[Math.floor(random() * SHAPES.length)],
-  };
+function matchingStimulus(pattern: StimulusPattern, random: () => number, excluded: StimulusPattern[] = []): Stimulus {
+  const candidates = ALL_STIMULI.filter((stimulus) => (
+    matchesPattern(stimulus, pattern)
+    && !excluded.some((excludedPattern) => matchesPattern(stimulus, excludedPattern))
+  ));
+  if (candidates.length === 0) throw new Error("No stimulus satisfies the requested pattern.");
+  return candidates[Math.floor(random() * candidates.length)];
 }
 
 function buildPatternTrials(successes: number, seed: number, pattern: StimulusPattern[]) {
@@ -164,6 +162,19 @@ function describePattern(pattern: StimulusPattern[]) {
   return pattern.map(describePatternStep).join(" → ");
 }
 
+function findPatternWindows(sequence: Stimulus[], pattern: StimulusPattern[]) {
+  if (pattern.length < 2) return [];
+  const windows: Stimulus[][] = [];
+
+  for (let index = 0; index <= sequence.length - pattern.length; index += 1) {
+    if (matchesPattern(sequence[index], pattern[0])) {
+      windows.push(sequence.slice(index, index + pattern.length));
+    }
+  }
+
+  return windows;
+}
+
 function buildCalibrationSequence(patterns: CalibrationPattern[], seed: number) {
   const random = seededRandom(seed + 417);
   const trials = patterns.flatMap((pattern) =>
@@ -177,8 +188,11 @@ function buildCalibrationSequence(patterns: CalibrationPattern[], seed: number) 
 
   shuffled(trials, random).forEach(({ pattern, success }, index) => {
     if (index > 0) sequence.push(randomStimulus(random, antecedents));
-    sequence.push(matchingStimulus(pattern.antecedent, random));
-    sequence.push(success ? matchingStimulus(pattern.consequent, random) : randomStimulus(random, [...antecedents, pattern.consequent]));
+    const otherAntecedents = antecedents.filter((antecedent) => antecedent !== pattern.antecedent);
+    sequence.push(matchingStimulus(pattern.antecedent, random, otherAntecedents));
+    sequence.push(success
+      ? matchingStimulus(pattern.consequent, random, antecedents)
+      : randomStimulus(random, [...antecedents, pattern.consequent]));
   });
 
   return sequence;
@@ -375,8 +389,8 @@ function ConfidenceControl({ value, onChange }: { value: number; onChange: (valu
   );
 }
 
-function Chart({ ratings }: { ratings: number[] }) {
-  const evidence = [80, ...EVIDENCE_RATES];
+function Chart({ ratings, initialTargetRate }: { ratings: number[]; initialTargetRate: number }) {
+  const evidence = [initialTargetRate, ...EVIDENCE_RATES];
   const width = 620;
   const height = 260;
   const pad = { left: 34, right: 16, top: 20, bottom: 34 };
@@ -404,7 +418,7 @@ function Chart({ ratings }: { ratings: number[] }) {
       </svg>
       <div className="mt-1 ml-6.5 flex gap-4.5 text-[10px] text-[#777673]">
         <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[#79628a]" />Your confidence</span>
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Observed success rate</span>
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Programmed target rate</span>
       </div>
     </>
   );
@@ -446,6 +460,7 @@ export function ExperimentDemo() {
   const activePattern = condition === "provided" ? providedPattern : machinePattern;
   const checkedPattern = activePattern.every((step) => step.color || step.shape) ? activePattern : DEFAULT_MACHINE_PATTERN;
   const hypothesis = condition === "provided" ? describePattern(providedPattern) : describePattern(machinePattern);
+  const initialTargetRate = Math.round(calibrationPatterns[0].successes / CALIBRATION_TRIALS_PER_PATTERN * 100);
 
   const startExperiment = () => {
     setRunSeed(Math.floor(Math.random() * 4_294_967_295));
@@ -467,11 +482,13 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-7-configurable-calibration",
+      version: "prototype-8-fixed-evidence-streams",
       condition,
       hypothesis,
       pattern: activePattern,
+      evidencePattern: providedPattern,
       calibrationPatterns,
+      calibrationSequence,
       calibrationPatternHoldPercentage: CALIBRATION_PATTERN_HOLD_PERCENTAGE,
       calibrationRealizedHoldPercentage: Math.round(
         calibrationPatterns.reduce((total, pattern) => total + pattern.successes, 0)
@@ -479,7 +496,7 @@ export function ExperimentDemo() {
       ) / 10,
       runSeed,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
-      diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
+      evidenceTargetRates: [initialTargetRate, ...EVIDENCE_RATES],
       startedAt,
       completedAt: new Date().toISOString(),
     };
@@ -490,14 +507,17 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [activePattern, calibrationPatterns, condition, hypothesis, ratings, runSeed, startedAt]);
+  }, [activePattern, calibrationPatterns, calibrationSequence, condition, hypothesis, initialTargetRate, providedPattern, ratings, runSeed, startedAt]);
 
-  const diagnosticTrials = useMemo(() => buildPatternTrials(8, runSeed + 1_197, checkedPattern), [checkedPattern, runSeed]);
+  const calibrationReviewWindows = useMemo(
+    () => findPatternWindows(calibrationSequence, checkedPattern),
+    [calibrationSequence, checkedPattern],
+  );
 
   const evidenceSequence = useMemo(() => {
     if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, runSeed + 2_400 + round * 73, checkedPattern);
-  }, [checkedPattern, round, runSeed]);
+    return buildSequence(EVIDENCE_RATES[round] / 10, runSeed + 2_400 + round * 73, providedPattern);
+  }, [providedPattern, round, runSeed]);
 
   const updatePatternStep = (id: number, update: Partial<Pick<PatternStep, "color" | "shape">>) => {
     setPatternSteps((current) => current.map((step) => step.id === id ? { ...step, ...update } : step));
@@ -621,12 +641,12 @@ export function ExperimentDemo() {
 
         {screen === "review" && (
           <>
-            <p className={EYEBROW}>Standardized review</p>
-            <h1 className={HEADING}>Check the pattern</h1>
-            <p className={LEDE}>The matched pair receives the same review.</p>
+            <p className={EYEBROW}>Calibration review</p>
+            <h1 className={HEADING}>Check what you saw</h1>
+            <p className={LEDE}>Every row below comes directly from the calibration sequence you watched.</p>
             <div className={BELIEF_CARD}><span className="text-[10px] font-semibold text-[#715d82]">Current hypothesis</span><p className="mt-3 whitespace-pre-wrap wrap-break-word text-[19px] leading-normal font-medium text-[#2c2c2b]">{hypothesis}</p></div>
-            <div className="mt-6 grid gap-2.25 sm:grid-cols-2">
-              {diagnosticTrials.map((trial, index) => {
+            {calibrationReviewWindows.length > 0 ? <div className="mt-6 grid gap-2.25 sm:grid-cols-2">
+              {calibrationReviewWindows.map((trial, index) => {
                 const success = trial.every((stimulus, stepIndex) => matchesPattern(stimulus, checkedPattern[stepIndex]));
                 return (
                   <div className={`min-w-0 overflow-x-auto rounded-lg border px-3 py-2.75 ${success ? "border-[#715d82]/20 bg-[#f5f2f7]" : "border-black/10 bg-white"}`} key={index}>
@@ -641,7 +661,7 @@ export function ExperimentDemo() {
                   </div>
                 );
               })}
-            </div>
+            </div> : <div className="mt-6 rounded-lg border border-black/10 bg-white px-4 py-5 text-xs text-[#777673]">The first step of this pattern did not occur in the calibration sequence.</div>}
             <div className={ACTIONS}><StrokeButton onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
           </>
         )}
@@ -677,7 +697,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Demo complete</p>
             <h1 className={HEADING}>Your confidence over time</h1>
             <p className={LEDE}>Prototype summary.</p>
-            <div className={`mt-7.5 rounded-[13px] bg-white px-5 pt-6 pb-4.5 ${GRAPHITE_CARD}`}><Chart ratings={ratings} /></div>
+            <div className={`mt-7.5 rounded-[13px] bg-white px-5 pt-6 pb-4.5 ${GRAPHITE_CARD}`}><Chart ratings={ratings} initialTargetRate={initialTargetRate} /></div>
             <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings[0]}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Initial confidence</div></div>
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings.at(-1)}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Final confidence</div></div>
