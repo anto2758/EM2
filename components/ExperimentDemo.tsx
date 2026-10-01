@@ -14,6 +14,9 @@ const SHAPES = ["circle", "triangle", "square", "pentagon"] as const;
 const COLOR_NAMES = Object.keys(COLORS) as ColorName[];
 const EVIDENCE_RATES = [80, 70, 50, 30, 20] as const;
 const STIMULUS_INTERVAL_MS = 1400;
+const CALIBRATION_TRIALS_PER_PATTERN = 6;
+// Change this value from 0 to 100 to configure how often calibration patterns hold.
+const CALIBRATION_PATTERN_HOLD_PERCENTAGE = 90;
 
 type ColorName = keyof typeof COLORS;
 type ShapeName = (typeof SHAPES)[number];
@@ -78,16 +81,26 @@ function generateCalibrationPatterns(seed: number): CalibrationPattern[] {
   const colorPair = shuffled([...COLOR_NAMES], random).slice(0, 2);
   const complexShapes = shuffled([...SHAPES], random).slice(0, 2);
   const complexColors = shuffled([...COLOR_NAMES], random).slice(0, 2);
+  const totalTrials = CALIBRATION_TRIALS_PER_PATTERN * 3;
+  const configuredPercentage = Math.max(0, Math.min(100, CALIBRATION_PATTERN_HOLD_PERCENTAGE));
+  const totalSuccesses = Math.round(totalTrials * configuredPercentage / 100);
+  const successesPerPattern = Math.floor(totalSuccesses / 3);
+  const extraSuccesses = totalSuccesses % 3;
+  const successCounts = shuffled(
+    Array.from({ length: 3 }, (_, index) => successesPerPattern + (index < extraSuccesses ? 1 : 0)),
+    random,
+  );
 
-  return shuffled([
-    { antecedent: { shape: shapePair[0] }, consequent: { shape: shapePair[1] }, successes: 6 },
-    { antecedent: { color: colorPair[0] }, consequent: { color: colorPair[1] }, successes: 6 },
+  const patterns = [
+    { antecedent: { shape: shapePair[0] }, consequent: { shape: shapePair[1] } },
+    { antecedent: { color: colorPair[0] }, consequent: { color: colorPair[1] } },
     {
       antecedent: { color: complexColors[0], shape: complexShapes[0] },
       consequent: { color: complexColors[1], shape: complexShapes[1] },
-      successes: 5,
     },
-  ], random);
+  ];
+
+  return shuffled(patterns.map((pattern, index) => ({ ...pattern, successes: successCounts[index] })), random);
 }
 
 function makeStimulus(color: ColorName, random: () => number): Stimulus {
@@ -155,7 +168,7 @@ function buildCalibrationSequence(patterns: CalibrationPattern[], seed: number) 
   const random = seededRandom(seed + 417);
   const trials = patterns.flatMap((pattern) =>
     shuffled(
-      Array.from({ length: 6 }, (_, index) => ({ pattern, success: index < pattern.successes })),
+      Array.from({ length: CALIBRATION_TRIALS_PER_PATTERN }, (_, index) => ({ pattern, success: index < pattern.successes })),
       random,
     ),
   );
@@ -304,10 +317,11 @@ function SequencePlayer({ sequence, onComplete }: { sequence: Stimulus[]; onComp
   const playing = started && index < sequence.length;
   const progress = playing ? (((index ?? 0) + 1) / sequence.length) * 100 : 0;
   const currentIndex = index ?? 0;
-  const visibleStimuli = Array.from({ length: Math.min(3, currentIndex + 1) }, (_, offset) => ({
-    stimulus: sequence[currentIndex - offset],
-    sequenceIndex: currentIndex - offset,
-  }));
+  const firstVisibleIndex = Math.max(0, currentIndex - 2);
+  const visibleStimuli = Array.from({ length: currentIndex - firstVisibleIndex + 1 }, (_, offset) => {
+    const sequenceIndex = firstVisibleIndex + offset;
+    return { stimulus: sequence[sequenceIndex], sequenceIndex };
+  });
 
   return (
     <>
@@ -318,9 +332,9 @@ function SequencePlayer({ sequence, onComplete }: { sequence: Stimulus[]; onComp
               {visibleStimuli.map(({ stimulus, sequenceIndex }) => (
                 <motion.div
                   layout="position"
-                  initial={{ opacity: 0, x: -120 }}
+                  initial={{ opacity: 0, x: 120 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 120 }}
+                  exit={{ opacity: 0, x: -120 }}
                   transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
                   className="shrink-0"
                   key={sequenceIndex}
@@ -453,11 +467,16 @@ export function ExperimentDemo() {
 
   const downloadData = useCallback(() => {
     const payload = {
-      version: "prototype-6-randomized-patterns",
+      version: "prototype-7-configurable-calibration",
       condition,
       hypothesis,
       pattern: activePattern,
       calibrationPatterns,
+      calibrationPatternHoldPercentage: CALIBRATION_PATTERN_HOLD_PERCENTAGE,
+      calibrationRealizedHoldPercentage: Math.round(
+        calibrationPatterns.reduce((total, pattern) => total + pattern.successes, 0)
+        / (calibrationPatterns.length * CALIBRATION_TRIALS_PER_PATTERN) * 1_000,
+      ) / 10,
       runSeed,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
       diagnosticSuccessRates: [80, ...EVIDENCE_RATES],
