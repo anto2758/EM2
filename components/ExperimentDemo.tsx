@@ -12,11 +12,13 @@ const COLORS = {
 
 const SHAPES = ["circle", "triangle", "square", "pentagon"] as const;
 const COLOR_NAMES = Object.keys(COLORS) as ColorName[];
-const EVIDENCE_RATES = [80, 70, 50, 30, 20] as const;
+const EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES = [80, 70, 50, 30, 20] as const;
 const STIMULUS_INTERVAL_MS = 1400;
-const CALIBRATION_TRIALS_PER_PATTERN = 6;
-// Change this value from 0 to 100 to configure how often calibration patterns hold.
-const CALIBRATION_PATTERN_HOLD_PERCENTAGE = 90;
+const MARKOV_ORDER = 3;
+const CALIBRATION_SEQUENCE_LENGTH = 60;
+const EVIDENCE_SEQUENCE_LENGTH = 40;
+// Change this value from 0 to 100 to configure the preferred calibration transition weight.
+const CALIBRATION_PREFERRED_TRANSITION_PERCENTAGE = 95;
 
 type ColorName = keyof typeof COLORS;
 type ShapeName = (typeof SHAPES)[number];
@@ -25,14 +27,11 @@ type Screen = "setup" | "intro" | "calibration" | "hypothesis" | "review" | "con
 type Stimulus = { color: ColorName; shape: ShapeName };
 type StimulusPattern = { color?: ColorName; shape?: ShapeName };
 type PatternStep = { id: number; color: ColorName | "any"; shape: ShapeName | "any" };
-type CalibrationPattern = {
-  antecedent: StimulusPattern;
-  consequent: StimulusPattern;
-  successes: number;
+type MarkovModel = {
+  states: Stimulus[];
+  preferredNextByContext: number[];
 };
 type IconName = "pencil" | "receive";
-
-const ALL_STIMULI: Stimulus[] = COLOR_NAMES.flatMap((color) => SHAPES.map((shape) => ({ color, shape })));
 
 const COLOR_OPTIONS: Array<{ value: ColorName | "any"; label: string }> = [
   { value: "any", label: "Any color" },
@@ -77,76 +76,73 @@ function shuffled<T>(values: T[], random: () => number) {
   return copy;
 }
 
-function generateCalibrationPatterns(seed: number): CalibrationPattern[] {
+function generateMarkovModel(seed: number): MarkovModel {
   const random = seededRandom(seed);
-  const shapePair = shuffled([...SHAPES], random).slice(0, 2);
-  const colorPair = shuffled([...COLOR_NAMES], random).slice(0, 2);
-  const complexShapes = shuffled(SHAPES.filter((shape) => shape !== shapePair[0]), random).slice(0, 2);
-  const complexColors = shuffled(COLOR_NAMES.filter((color) => color !== colorPair[0]), random).slice(0, 2);
-  const totalTrials = CALIBRATION_TRIALS_PER_PATTERN * 3;
-  const configuredPercentage = Math.max(0, Math.min(100, CALIBRATION_PATTERN_HOLD_PERCENTAGE));
-  const totalSuccesses = Math.round(totalTrials * configuredPercentage / 100);
-  const successesPerPattern = Math.floor(totalSuccesses / 3);
-  const extraSuccesses = totalSuccesses % 3;
-  const successCounts = shuffled(
-    Array.from({ length: 3 }, (_, index) => successesPerPattern + (index < extraSuccesses ? 1 : 0)),
-    random,
-  );
+  const shapes = shuffled([...SHAPES], random);
+  const colors = shuffled([...COLOR_NAMES], random);
+  const states = shapes.map((shape, index) => ({ shape, color: colors[index] }));
+  const contextCount = states.length ** MARKOV_ORDER;
 
-  const patterns = [
-    { antecedent: { shape: shapePair[0] }, consequent: { shape: shapePair[1] } },
-    { antecedent: { color: colorPair[0] }, consequent: { color: colorPair[1] } },
-    {
-      antecedent: { color: complexColors[0], shape: complexShapes[0] },
-      consequent: { color: complexColors[1], shape: complexShapes[1] },
-    },
-  ];
-
-  return shuffled(patterns.map((pattern, index) => ({ ...pattern, successes: successCounts[index] })), random);
+  return {
+    states,
+    preferredNextByContext: Array.from(
+      { length: contextCount },
+      () => Math.floor(random() * states.length),
+    ),
+  };
 }
 
 function matchesPattern(stimulus: Stimulus, pattern: StimulusPattern) {
   return (!pattern.color || stimulus.color === pattern.color) && (!pattern.shape || stimulus.shape === pattern.shape);
 }
 
-function randomStimulus(random: () => number, excluded: StimulusPattern[] = []): Stimulus {
-  const candidates = ALL_STIMULI.filter((stimulus) => !excluded.some((pattern) => matchesPattern(stimulus, pattern)));
-  if (candidates.length === 0) throw new Error("No stimulus satisfies the requested exclusions.");
-  return candidates[Math.floor(random() * candidates.length)];
+function stimulusStateIndex(stimulus: Stimulus, model: MarkovModel) {
+  return model.states.findIndex((state) => state.color === stimulus.color && state.shape === stimulus.shape);
 }
 
-function matchingStimulus(pattern: StimulusPattern, random: () => number, excluded: StimulusPattern[] = []): Stimulus {
-  const candidates = ALL_STIMULI.filter((stimulus) => (
-    matchesPattern(stimulus, pattern)
-    && !excluded.some((excludedPattern) => matchesPattern(stimulus, excludedPattern))
-  ));
-  if (candidates.length === 0) throw new Error("No stimulus satisfies the requested pattern.");
-  return candidates[Math.floor(random() * candidates.length)];
+function contextIndex(stateIndices: number[], stateCount: number) {
+  return stateIndices.reduce((value, stateIndex) => value * stateCount + stateIndex, 0);
 }
 
-function buildPatternTrials(successes: number, seed: number, pattern: StimulusPattern[]) {
+function sequenceContextIndex(sequence: Stimulus[], start: number, model: MarkovModel) {
+  const indices = sequence
+    .slice(start, start + MARKOV_ORDER)
+    .map((stimulus) => stimulusStateIndex(stimulus, model));
+
+  if (indices.length !== MARKOV_ORDER || indices.some((index) => index < 0)) return -1;
+  return contextIndex(indices, model.states.length);
+}
+
+function generateMarkovSequence(
+  model: MarkovModel,
+  length: number,
+  seed: number,
+  preferredTransitionPercentage: number,
+) {
   const random = seededRandom(seed);
-  const outcomes = shuffled(Array.from({ length: 10 }, (_, index) => index < successes), random);
+  const preferredWeight = Math.max(0, Math.min(100, preferredTransitionPercentage)) / 100;
+  const sequence = shuffled(model.states, random).slice(0, Math.min(MARKOV_ORDER, length));
 
-  return outcomes.map((success) => {
-    const failingIndex = success ? -1 : 1 + Math.floor(random() * (pattern.length - 1));
-    return pattern.map((step, index) => (
-      index === failingIndex ? randomStimulus(random, [step]) : matchingStimulus(step, random)
+  while (sequence.length < length) {
+    const currentContextIndex = sequenceContextIndex(sequence, sequence.length - MARKOV_ORDER, model);
+    const preferredStateIndex = model.preferredNextByContext[currentContextIndex];
+    const alternativeWeight = (1 - preferredWeight) / (model.states.length - 1);
+    const transitionWeights = model.states.map((_, index) => (
+      index === preferredStateIndex ? preferredWeight : alternativeWeight
     ));
-  });
-}
-
-function buildSequence(successes: number, seed: number, pattern: StimulusPattern[] = DEFAULT_MACHINE_PATTERN) {
-  const random = seededRandom(seed + 991);
-  const trials = buildPatternTrials(successes, seed, pattern);
-  const sequence: Stimulus[] = [];
-
-  trials.forEach((trial, index) => {
-    if (index > 0) {
-      sequence.push(randomStimulus(random, [pattern[0]]));
+    const draw = random();
+    let cumulativeWeight = 0;
+    let nextStateIndex = transitionWeights.length - 1;
+    for (let index = 0; index < transitionWeights.length; index += 1) {
+      cumulativeWeight += transitionWeights[index];
+      if (draw < cumulativeWeight) {
+        nextStateIndex = index;
+        break;
+      }
     }
-    sequence.push(...trial);
-  });
+
+    sequence.push(model.states[nextStateIndex]);
+  }
 
   return sequence;
 }
@@ -165,9 +161,13 @@ function describePattern(pattern: StimulusPattern[]) {
 function findPatternWindows(sequence: Stimulus[], pattern: StimulusPattern[]) {
   if (pattern.length < 2) return [];
   const windows: Stimulus[][] = [];
+  const antecedent = pattern.slice(0, -1);
 
   for (let index = 0; index <= sequence.length - pattern.length; index += 1) {
-    if (matchesPattern(sequence[index], pattern[0])) {
+    const antecedentMatches = antecedent.every(
+      (step, offset) => matchesPattern(sequence[index + offset], step),
+    );
+    if (antecedentMatches) {
       windows.push(sequence.slice(index, index + pattern.length));
     }
   }
@@ -175,27 +175,55 @@ function findPatternWindows(sequence: Stimulus[], pattern: StimulusPattern[]) {
   return windows;
 }
 
-function buildCalibrationSequence(patterns: CalibrationPattern[], seed: number) {
-  const random = seededRandom(seed + 417);
-  const trials = patterns.flatMap((pattern) =>
-    shuffled(
-      Array.from({ length: CALIBRATION_TRIALS_PER_PATTERN }, (_, index) => ({ pattern, success: index < pattern.successes })),
-      random,
-    ),
-  );
-  const sequence: Stimulus[] = [];
-  const antecedents = patterns.map((pattern) => pattern.antecedent);
+function selectObservedMarkovPattern(sequence: Stimulus[], model: MarkovModel): StimulusPattern[] {
+  const observations = new Map<number, { opportunities: number; holds: number }>();
 
-  shuffled(trials, random).forEach(({ pattern, success }, index) => {
-    if (index > 0) sequence.push(randomStimulus(random, antecedents));
-    const otherAntecedents = antecedents.filter((antecedent) => antecedent !== pattern.antecedent);
-    sequence.push(matchingStimulus(pattern.antecedent, random, otherAntecedents));
-    sequence.push(success
-      ? matchingStimulus(pattern.consequent, random, antecedents)
-      : randomStimulus(random, [...antecedents, pattern.consequent]));
-  });
+  for (let index = 0; index <= sequence.length - MARKOV_ORDER - 1; index += 1) {
+    const observedContextIndex = sequenceContextIndex(sequence, index, model);
+    if (observedContextIndex < 0) continue;
+    const preferredStateIndex = model.preferredNextByContext[observedContextIndex];
+    const actualStateIndex = stimulusStateIndex(sequence[index + MARKOV_ORDER], model);
+    const current = observations.get(observedContextIndex) ?? { opportunities: 0, holds: 0 };
+    current.opportunities += 1;
+    if (actualStateIndex === preferredStateIndex) current.holds += 1;
+    observations.set(observedContextIndex, current);
+  }
 
-  return sequence;
+  const selected = [...observations.entries()]
+    .filter(([, observation]) => observation.holds > 0)
+    .sort((left, right) => (
+      right[1].opportunities - left[1].opportunities
+      || right[1].holds / right[1].opportunities - left[1].holds / left[1].opportunities
+      || left[0] - right[0]
+    ))[0];
+
+  if (!selected) return sequence.slice(0, MARKOV_ORDER + 1);
+
+  const [selectedContextIndex] = selected;
+  const stateIndices = Array.from({ length: MARKOV_ORDER }, (_, offset) => (
+    Math.floor(selectedContextIndex / model.states.length ** (MARKOV_ORDER - offset - 1))
+    % model.states.length
+  ));
+  const preferredStateIndex = model.preferredNextByContext[selectedContextIndex];
+
+  return [...stateIndices.map((index) => model.states[index]), model.states[preferredStateIndex]];
+}
+
+function realizedPreferredTransitionPercentage(sequence: Stimulus[], model: MarkovModel) {
+  let opportunities = 0;
+  let preferredTransitions = 0;
+
+  for (let index = 0; index <= sequence.length - MARKOV_ORDER - 1; index += 1) {
+    const observedContextIndex = sequenceContextIndex(sequence, index, model);
+    if (observedContextIndex < 0) continue;
+    opportunities += 1;
+    const actualStateIndex = stimulusStateIndex(sequence[index + MARKOV_ORDER], model);
+    if (actualStateIndex === model.preferredNextByContext[observedContextIndex]) {
+      preferredTransitions += 1;
+    }
+  }
+
+  return opportunities === 0 ? 0 : Math.round(preferredTransitions / opportunities * 1_000) / 10;
 }
 
 function Icon({ name }: { name: IconName }) {
@@ -389,8 +417,7 @@ function ConfidenceControl({ value, onChange }: { value: number; onChange: (valu
   );
 }
 
-function Chart({ ratings, initialTargetRate }: { ratings: number[]; initialTargetRate: number }) {
-  const evidence = [initialTargetRate, ...EVIDENCE_RATES];
+function Chart({ ratings, transitionRates }: { ratings: number[]; transitionRates: number[] }) {
   const width = 620;
   const height = 260;
   const pad = { left: 34, right: 16, top: 20, bottom: 34 };
@@ -407,7 +434,7 @@ function Chart({ ratings, initialTargetRate }: { ratings: number[]; initialTarge
             <text className="fill-[#9a9995] text-[9px]" x="3" y={y(value) + 3}>{value}</text>
           </g>
         ))}
-        <polyline className="fill-none stroke-[#b6b3ad] stroke-2 [stroke-dasharray:5_5]" points={points(evidence)} />
+        <polyline className="fill-none stroke-[#b6b3ad] stroke-2 [stroke-dasharray:5_5]" points={points(transitionRates)} />
         <polyline className="fill-none stroke-[#79628a] stroke-[2.5] [stroke-linecap:round] [stroke-linejoin:round]" points={points(ratings)} />
         {ratings.map((value, index) => <circle className="fill-white stroke-[#79628a] stroke-2" cx={x(index)} cy={y(value)} r="4" key={`point-${index}`} />)}
         {ratings.map((_, index) => (
@@ -418,7 +445,7 @@ function Chart({ ratings, initialTargetRate }: { ratings: number[]; initialTarge
       </svg>
       <div className="mt-1 ml-6.5 flex gap-4.5 text-[10px] text-[#777673]">
         <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[#79628a]" />Your confidence</span>
-        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Programmed target rate</span>
+        <span className="inline-flex items-center gap-1.5"><i className="h-0.5 w-4.5 bg-[repeating-linear-gradient(90deg,#b6b3ad_0_5px,transparent_5px_8px)]" />Observed preferred transitions</span>
       </div>
     </>
   );
@@ -449,9 +476,17 @@ export function ExperimentDemo() {
   const [sequenceComplete, setSequenceComplete] = useState(false);
   const [runSeed, setRunSeed] = useState(1197);
   const nextPatternStepId = useRef(3);
-  const calibrationPatterns = useMemo(() => generateCalibrationPatterns(runSeed), [runSeed]);
-  const calibrationSequence = useMemo(() => buildCalibrationSequence(calibrationPatterns, runSeed), [calibrationPatterns, runSeed]);
-  const providedPattern = useMemo(() => [calibrationPatterns[0].antecedent, calibrationPatterns[0].consequent], [calibrationPatterns]);
+  const markovModel = useMemo(() => generateMarkovModel(runSeed), [runSeed]);
+  const calibrationSequence = useMemo(() => generateMarkovSequence(
+    markovModel,
+    CALIBRATION_SEQUENCE_LENGTH,
+    runSeed + 417,
+    CALIBRATION_PREFERRED_TRANSITION_PERCENTAGE,
+  ), [markovModel, runSeed]);
+  const providedPattern = useMemo(
+    () => selectObservedMarkovPattern(calibrationSequence, markovModel),
+    [calibrationSequence, markovModel],
+  );
   const machinePattern = useMemo<StimulusPattern[]>(() => patternSteps.map((step) => ({
     ...(step.color !== "any" ? { color: step.color } : {}),
     ...(step.shape !== "any" ? { shape: step.shape } : {}),
@@ -460,7 +495,18 @@ export function ExperimentDemo() {
   const activePattern = condition === "provided" ? providedPattern : machinePattern;
   const checkedPattern = activePattern.every((step) => step.color || step.shape) ? activePattern : DEFAULT_MACHINE_PATTERN;
   const hypothesis = condition === "provided" ? describePattern(providedPattern) : describePattern(machinePattern);
-  const initialTargetRate = Math.round(calibrationPatterns[0].successes / CALIBRATION_TRIALS_PER_PATTERN * 100);
+  const evidenceSequences = useMemo(() => EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES.map((preferredTransitionPercentage, index) => (
+    generateMarkovSequence(
+      markovModel,
+      EVIDENCE_SEQUENCE_LENGTH,
+      runSeed + 2_400 + index * 73,
+      preferredTransitionPercentage,
+    )
+  )), [markovModel, runSeed]);
+  const observedPreferredTransitionPercentages = useMemo(() => [
+    realizedPreferredTransitionPercentage(calibrationSequence, markovModel),
+    ...evidenceSequences.map((sequence) => realizedPreferredTransitionPercentage(sequence, markovModel)),
+  ], [calibrationSequence, evidenceSequences, markovModel]);
 
   const startExperiment = () => {
     setRunSeed(Math.floor(Math.random() * 4_294_967_295));
@@ -481,22 +527,31 @@ export function ExperimentDemo() {
   }, []);
 
   const downloadData = useCallback(() => {
+    const calibrationPatternWindows = findPatternWindows(calibrationSequence, checkedPattern);
+    const calibrationPatternHolds = calibrationPatternWindows.filter((window) => (
+      window.every((stimulus, index) => matchesPattern(stimulus, checkedPattern[index]))
+    )).length;
     const payload = {
-      version: "prototype-8-fixed-evidence-streams",
+      version: "prototype-10-third-order-markov",
       condition,
       hypothesis,
       pattern: activePattern,
-      evidencePattern: providedPattern,
-      calibrationPatterns,
+      providedPattern,
+      markovOrder: MARKOV_ORDER,
+      markovModel,
       calibrationSequence,
-      calibrationPatternHoldPercentage: CALIBRATION_PATTERN_HOLD_PERCENTAGE,
-      calibrationRealizedHoldPercentage: Math.round(
-        calibrationPatterns.reduce((total, pattern) => total + pattern.successes, 0)
-        / (calibrationPatterns.length * CALIBRATION_TRIALS_PER_PATTERN) * 1_000,
-      ) / 10,
+      evidenceSequences,
+      programmedPreferredTransitionPercentages: [
+        CALIBRATION_PREFERRED_TRANSITION_PERCENTAGE,
+        ...EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES,
+      ],
+      observedPreferredTransitionPercentages,
+      calibrationPatternReview: {
+        opportunities: calibrationPatternWindows.length,
+        holds: calibrationPatternHolds,
+      },
       runSeed,
       ratings: ratings.map((rating, index) => ({ stage: index === 0 ? "initial" : `evidence-${index}`, confidence: rating })),
-      evidenceTargetRates: [initialTargetRate, ...EVIDENCE_RATES],
       startedAt,
       completedAt: new Date().toISOString(),
     };
@@ -507,17 +562,14 @@ export function ExperimentDemo() {
     anchor.download = `em2-demo-${condition}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [activePattern, calibrationPatterns, calibrationSequence, condition, hypothesis, initialTargetRate, providedPattern, ratings, runSeed, startedAt]);
+  }, [activePattern, calibrationSequence, checkedPattern, condition, evidenceSequences, hypothesis, markovModel, observedPreferredTransitionPercentages, providedPattern, ratings, runSeed, startedAt]);
 
   const calibrationReviewWindows = useMemo(
     () => findPatternWindows(calibrationSequence, checkedPattern),
     [calibrationSequence, checkedPattern],
   );
 
-  const evidenceSequence = useMemo(() => {
-    if (round >= EVIDENCE_RATES.length) return [];
-    return buildSequence(EVIDENCE_RATES[round] / 10, runSeed + 2_400 + round * 73, providedPattern);
-  }, [providedPattern, round, runSeed]);
+  const evidenceSequence = evidenceSequences[round] ?? [];
 
   const updatePatternStep = (id: number, update: Partial<Pick<PatternStep, "color" | "shape">>) => {
     setPatternSteps((current) => current.map((step) => step.id === id ? { ...step, ...update } : step));
@@ -536,7 +588,7 @@ export function ExperimentDemo() {
   const submitEvidenceRating = () => {
     setRatings((current) => [...current, confidence]);
     setSequenceComplete(false);
-    if (round === EVIDENCE_RATES.length - 1) setScreen("results");
+    if (round === EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES.length - 1) setScreen("results");
     else setRound((current) => current + 1);
   };
 
@@ -661,7 +713,7 @@ export function ExperimentDemo() {
                   </div>
                 );
               })}
-            </div> : <div className="mt-6 rounded-lg border border-black/10 bg-white px-4 py-5 text-xs text-[#777673]">The first step of this pattern did not occur in the calibration sequence.</div>}
+            </div> : <div className="mt-6 rounded-lg border border-black/10 bg-white px-4 py-5 text-xs text-[#777673]">The preceding steps of this pattern did not occur together in the calibration sequence.</div>}
             <div className={ACTIONS}><StrokeButton onClick={() => { setConfidence(70); setScreen("confidence"); }}>Rate my confidence</StrokeButton></div>
           </>
         )}
@@ -679,14 +731,14 @@ export function ExperimentDemo() {
 
         {screen === "evidence" && (
           <>
-            <span className="mb-3.5 inline-flex rounded-full bg-[#e5e0e9] px-2.25 py-1.5 text-[10px] font-semibold text-[#715d82]">Evidence block {round + 1} of {EVIDENCE_RATES.length}</span>
+            <span className="mb-3.5 inline-flex rounded-full bg-[#e5e0e9] px-2.25 py-1.5 text-[10px] font-semibold text-[#715d82]">Evidence block {round + 1} of {EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES.length}</span>
             <h1 className={HEADING}>Watch again</h1>
             <p className={LEDE}>Keep your pattern in mind.</p>
             <SequencePlayer sequence={evidenceSequence} onComplete={() => { setConfidence(ratings.at(-1) ?? 70); setSequenceComplete(true); }} />
             {sequenceComplete && (
               <>
                 <div className={FORM_CARD}><label className={FIELD_LABEL}>Update your confidence</label><ConfidenceControl value={confidence} onChange={setConfidence} /></div>
-                <div className={`${ACTIONS} mt-3.5`}><StrokeButton onClick={submitEvidenceRating}>{round === EVIDENCE_RATES.length - 1 ? "Finish" : "Submit and continue"}</StrokeButton></div>
+                <div className={`${ACTIONS} mt-3.5`}><StrokeButton onClick={submitEvidenceRating}>{round === EVIDENCE_PREFERRED_TRANSITION_PERCENTAGES.length - 1 ? "Finish" : "Submit and continue"}</StrokeButton></div>
               </>
             )}
           </>
@@ -697,7 +749,7 @@ export function ExperimentDemo() {
             <p className={EYEBROW}>Demo complete</p>
             <h1 className={HEADING}>Your confidence over time</h1>
             <p className={LEDE}>Prototype summary.</p>
-            <div className={`mt-7.5 rounded-[13px] bg-white px-5 pt-6 pb-4.5 ${GRAPHITE_CARD}`}><Chart ratings={ratings} initialTargetRate={initialTargetRate} /></div>
+            <div className={`mt-7.5 rounded-[13px] bg-white px-5 pt-6 pb-4.5 ${GRAPHITE_CARD}`}><Chart ratings={ratings} transitionRates={observedPreferredTransitionPercentages} /></div>
             <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings[0]}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Initial confidence</div></div>
               <div className="rounded-lg bg-[#f7f7f5] p-3.5"><div className="text-lg font-semibold">{ratings.at(-1)}</div><div className="mt-1 text-[9px] leading-[1.3] text-[#a09f9c]">Final confidence</div></div>
