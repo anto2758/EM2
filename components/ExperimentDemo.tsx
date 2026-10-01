@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 const COLORS = {
   yellow: "#e6be55",
@@ -261,7 +262,7 @@ function Shape({ stimulus, mini = false }: { stimulus: Stimulus; mini?: boolean 
 
   return (
     <svg
-      className={mini ? "h-4.5 w-4.5 overflow-visible" : "h-48 w-48 overflow-visible drop-shadow-[0_4px_8px_rgba(28,27,24,0.04)]"}
+      className={mini ? "h-4.5 w-4.5 overflow-visible" : "h-24 w-24 overflow-visible drop-shadow-[0_4px_8px_rgba(28,27,24,0.04)] sm:h-40 sm:w-40 lg:h-44 lg:w-44"}
       viewBox="0 0 140 140"
       role={mini ? undefined : "img"}
       aria-label={mini ? undefined : `${stimulus.color} ${stimulus.shape}`}
@@ -302,12 +303,33 @@ function SequencePlayer({ sequence, onComplete }: { sequence: Stimulus[]; onComp
   const started = index !== null;
   const playing = started && index < sequence.length;
   const progress = playing ? (((index ?? 0) + 1) / sequence.length) * 100 : 0;
+  const currentIndex = index ?? 0;
+  const visibleStimuli = Array.from({ length: Math.min(3, currentIndex + 1) }, (_, offset) => ({
+    stimulus: sequence[currentIndex - offset],
+    sequenceIndex: currentIndex - offset,
+  }));
 
   return (
     <>
       {playing && (
-        <div className="fixed inset-0 z-100 grid place-items-center bg-[#fbfbfa]">
-          <Shape stimulus={sequence[index ?? 0]} />
+        <div className="fixed inset-0 z-100 grid place-items-center overflow-hidden bg-[#fbfbfa]">
+          <div className="relative flex w-full items-center justify-center gap-3 px-5 sm:gap-5 sm:px-8">
+            <AnimatePresence initial={false} mode="popLayout">
+              {visibleStimuli.map(({ stimulus, sequenceIndex }) => (
+                <motion.div
+                  layout="position"
+                  initial={{ opacity: 0, x: -120 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 120 }}
+                  transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1], layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } }}
+                  className="shrink-0"
+                  key={sequenceIndex}
+                >
+                  <Shape stimulus={stimulus} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
           <ProgressBar
             value={progress}
             label="Sequence progress"
